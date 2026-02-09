@@ -27,13 +27,37 @@ class NotificationType(str, enum.Enum):
     booking_created = "BOOKING_CREATED"
 
 
+# Use values_callable so SQLAlchemy persists enum .value (e.g. "OWNER") matching Postgres enums.
+ADMIN_ROLE_ENUM = Enum(
+    AdminRole,
+    name="adminrole",
+    values_callable=lambda enum_cls: [e.value for e in enum_cls],
+    native_enum=True,
+    validate_strings=True,
+)
+BOOKING_STATUS_ENUM = Enum(
+    BookingStatus,
+    name="bookingstatus",
+    values_callable=lambda enum_cls: [e.value for e in enum_cls],
+    native_enum=True,
+    validate_strings=True,
+)
+NOTIFICATION_TYPE_ENUM = Enum(
+    NotificationType,
+    name="notificationtype",
+    values_callable=lambda enum_cls: [e.value for e in enum_cls],
+    native_enum=True,
+    validate_strings=True,
+)
+
+
 class Admin(Base):
     __tablename__ = "admins"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
-    role: Mapped[AdminRole] = mapped_column(Enum(AdminRole), default=AdminRole.admin)
+    role: Mapped[AdminRole] = mapped_column(ADMIN_ROLE_ENUM, default=AdminRole.admin)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -94,7 +118,7 @@ class Booking(Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[BookingStatus] = mapped_column(Enum(BookingStatus), default=BookingStatus.new)
+    status: Mapped[BookingStatus] = mapped_column(BOOKING_STATUS_ENUM, default=BookingStatus.new)
     source: Mapped[str] = mapped_column(String(50), default="WEB")
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -112,7 +136,7 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    type: Mapped[NotificationType] = mapped_column(Enum(NotificationType))
+    type: Mapped[NotificationType] = mapped_column(NOTIFICATION_TYPE_ENUM)
     payload: Mapped[dict] = mapped_column(JSONB)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

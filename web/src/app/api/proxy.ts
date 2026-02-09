@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-const API_INTERNAL_BASE_URL = process.env.API_INTERNAL_BASE_URL ?? "http://localhost:8000";
+const API_INTERNAL_BASE_URL =
+  process.env.API_INTERNAL_BASE_URL ?? process.env.API_URL ?? "http://localhost:8000";
 
 function buildTargetUrl(request: Request, path: string) {
   const targetUrl = new URL(path, API_INTERNAL_BASE_URL);

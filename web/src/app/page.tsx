@@ -81,8 +81,15 @@ export default function HomePage() {
           setServices([]);
           return;
         }
-        const data = (await response.json()) as Service[];
-        setServices(data);
+        const data = (await response.json()) as unknown;
+        if (Array.isArray(data)) {
+          setServices(data as Service[]);
+        } else {
+          if (process.env.NODE_ENV !== "production") {
+            console.warn("Unexpected services response shape", data);
+          }
+          setServices([]);
+        }
       } catch (error) {
         setServices([]);
       }

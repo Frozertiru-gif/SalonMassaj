@@ -14,7 +14,15 @@ export const metadata: Metadata = {
 export default async function ServicesPage() {
   let services: Service[] = [];
   try {
-    services = await publicFetch<Service[]>("/public/services");
+    const data = await publicFetch<Service[]>("/public/services");
+    if (Array.isArray(data)) {
+      services = data;
+    } else {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("Unexpected services response shape", data);
+      }
+      services = [];
+    }
   } catch {
     services = [];
   }
@@ -39,6 +47,11 @@ export default async function ServicesPage() {
             <ServiceCard key={service.slug} service={service} />
           ))}
         </div>
+        {services.length === 0 ? (
+          <p className="mt-8 text-sm text-ink-600">
+            Услуги не найдены. Проверьте, что активные услуги опубликованы в админ-панели.
+          </p>
+        ) : null}
       </Container>
     </Section>
   );

@@ -16,3 +16,8 @@ app.add_middleware(
 app.include_router(public.router)
 app.include_router(auth.router)
 app.include_router(admin.router)
+
+
+@app.get("/health")
+def health_check() -> dict:
+    return {"status": "ok"}

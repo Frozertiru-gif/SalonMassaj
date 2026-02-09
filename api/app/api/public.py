@@ -1,13 +1,14 @@
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from sqlalchemy.sql import nullslast
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.models import Booking, BookingStatus, Notification, NotificationType, Service, ServiceCategory
-from app.schemas import AvailabilityOut, BookingCreate, BookingOut, ServiceCategoryOut, ServiceOut
+from app.models import Booking, BookingStatus, Notification, NotificationType, Review, Service, ServiceCategory, WeeklyRitual
+from app.schemas import AvailabilityOut, BookingCreate, BookingOut, ReviewOut, ServiceCategoryOut, ServiceOut, WeeklyRitualOut
 from app.utils import get_availability_slots, get_setting
 from app.services.telegram import send_booking_notification
 
@@ -37,6 +38,29 @@ async def get_service(slug: str, db: AsyncSession = Depends(get_db)):
 @router.get("/categories", response_model=list[ServiceCategoryOut])
 async def list_categories(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ServiceCategory).where(ServiceCategory.is_active.is_(True)))
+    return result.scalars().all()
+
+
+@router.get("/weekly-rituals", response_model=list[WeeklyRitualOut])
+async def list_weekly_rituals(db: AsyncSession = Depends(get_db)):
+    today = date.today()
+    query = select(WeeklyRitual).where(
+        WeeklyRitual.is_active.is_(True),
+        or_(WeeklyRitual.start_date.is_(None), WeeklyRitual.start_date <= today),
+        or_(WeeklyRitual.end_date.is_(None), WeeklyRitual.end_date >= today),
+    )
+    result = await db.execute(query.order_by(WeeklyRitual.sort_order, WeeklyRitual.created_at.desc()))
+    return result.scalars().all()
+
+
+@router.get("/reviews", response_model=list[ReviewOut])
+async def list_reviews(db: AsyncSession = Depends(get_db)):
+    query = (
+        select(Review)
+        .where(Review.is_published.is_(True))
+        .order_by(Review.sort_order, nullslast(Review.review_date.desc()), Review.created_at.desc())
+    )
+    result = await db.execute(query)
     return result.scalars().all()
 
 

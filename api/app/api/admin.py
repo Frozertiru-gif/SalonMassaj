@@ -8,11 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin
 from app.db import get_db
-from app.models import Booking, BookingStatus, Notification, Service, ServiceCategory, Setting
+from app.models import Booking, BookingStatus, Notification, Review, Service, ServiceCategory, Setting, WeeklyRitual
 from app.schemas import (
     BookingOut,
     BookingUpdate,
     NotificationOut,
+    ReviewCreate,
+    ReviewOut,
+    ReviewUpdate,
     ServiceCategoryCreate,
     ServiceCategoryOut,
     ServiceCategoryUpdate,
@@ -21,6 +24,9 @@ from app.schemas import (
     ServiceUpdate,
     SettingOut,
     SettingUpdate,
+    WeeklyRitualCreate,
+    WeeklyRitualOut,
+    WeeklyRitualUpdate,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
@@ -83,9 +89,22 @@ async def update_service(service_id: int, payload: ServiceUpdate, db: AsyncSessi
     service = result.scalar_one_or_none()
     if not service:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    if "slug" in updates and updates["slug"] is not None:
+        normalized = normalize_slug(updates["slug"])
+        if not normalized:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Slug cannot be empty")
+        exists = await db.execute(select(Service.id).where(Service.slug == normalized, Service.id != service_id))
+        if exists.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists")
+        updates["slug"] = normalized
+    for key, value in updates.items():
         setattr(service, key, value)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists") from exc
     await db.refresh(service)
     return service
 
@@ -111,7 +130,11 @@ async def list_categories(db: AsyncSession = Depends(get_db)):
 async def create_category(payload: ServiceCategoryCreate, db: AsyncSession = Depends(get_db)):
     category = ServiceCategory(**payload.model_dump())
     db.add(category)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category with this slug already exists") from exc
     await db.refresh(category)
     return category
 
@@ -122,9 +145,20 @@ async def update_category(category_id: int, payload: ServiceCategoryUpdate, db: 
     category = result.scalar_one_or_none()
     if not category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    if "slug" in updates and updates["slug"] is not None:
+        existing = await db.execute(
+            select(ServiceCategory.id).where(ServiceCategory.slug == updates["slug"], ServiceCategory.id != category_id)
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category with this slug already exists")
+    for key, value in updates.items():
         setattr(category, key, value)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category with this slug already exists") from exc
     await db.refresh(category)
     return category
 
@@ -135,7 +169,112 @@ async def delete_category(category_id: int, db: AsyncSession = Depends(get_db)):
     category = result.scalar_one_or_none()
     if not category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    services = await db.execute(select(Service.id).where(Service.category_id == category_id).limit(1))
+    if services.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category has services. Move or delete them before removing the category",
+        )
     await db.delete(category)
+    await db.commit()
+    return {"status": "deleted"}
+
+
+@router.get("/weekly-rituals", response_model=list[WeeklyRitualOut])
+async def list_weekly_rituals(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(WeeklyRitual).order_by(WeeklyRitual.sort_order, WeeklyRitual.created_at.desc()))
+    return result.scalars().all()
+
+
+@router.post("/weekly-rituals", response_model=WeeklyRitualOut)
+async def create_weekly_ritual(payload: WeeklyRitualCreate, db: AsyncSession = Depends(get_db)):
+    if payload.start_date and payload.end_date and payload.start_date > payload.end_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start date cannot be after end date")
+    ritual = WeeklyRitual(**payload.model_dump())
+    db.add(ritual)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Weekly ritual with this slug already exists") from exc
+    await db.refresh(ritual)
+    return ritual
+
+
+@router.put("/weekly-rituals/{ritual_id}", response_model=WeeklyRitualOut)
+async def update_weekly_ritual(ritual_id: int, payload: WeeklyRitualUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(WeeklyRitual).where(WeeklyRitual.id == ritual_id))
+    ritual = result.scalar_one_or_none()
+    if not ritual:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Weekly ritual not found")
+    updates = payload.model_dump(exclude_unset=True)
+    if "slug" in updates and updates["slug"] is not None:
+        existing = await db.execute(
+            select(WeeklyRitual.id).where(WeeklyRitual.slug == updates["slug"], WeeklyRitual.id != ritual_id)
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Weekly ritual with this slug already exists")
+    new_start = updates.get("start_date", ritual.start_date)
+    new_end = updates.get("end_date", ritual.end_date)
+    if new_start and new_end and new_start > new_end:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start date cannot be after end date")
+    for key, value in updates.items():
+        setattr(ritual, key, value)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Weekly ritual with this slug already exists") from exc
+    await db.refresh(ritual)
+    return ritual
+
+
+@router.delete("/weekly-rituals/{ritual_id}")
+async def delete_weekly_ritual(ritual_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(WeeklyRitual).where(WeeklyRitual.id == ritual_id))
+    ritual = result.scalar_one_or_none()
+    if not ritual:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Weekly ritual not found")
+    await db.delete(ritual)
+    await db.commit()
+    return {"status": "deleted"}
+
+
+@router.get("/reviews", response_model=list[ReviewOut])
+async def list_reviews(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Review).order_by(Review.sort_order, Review.created_at.desc()))
+    return result.scalars().all()
+
+
+@router.post("/reviews", response_model=ReviewOut)
+async def create_review(payload: ReviewCreate, db: AsyncSession = Depends(get_db)):
+    review = Review(**payload.model_dump())
+    db.add(review)
+    await db.commit()
+    await db.refresh(review)
+    return review
+
+
+@router.put("/reviews/{review_id}", response_model=ReviewOut)
+async def update_review(review_id: int, payload: ReviewUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Review).where(Review.id == review_id))
+    review = result.scalar_one_or_none()
+    if not review:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(review, key, value)
+    await db.commit()
+    await db.refresh(review)
+    return review
+
+
+@router.delete("/reviews/{review_id}")
+async def delete_review(review_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Review).where(Review.id == review_id))
+    review = result.scalar_one_or_none()
+    if not review:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
+    await db.delete(review)
     await db.commit()
     return {"status": "deleted"}
 

@@ -10,6 +10,11 @@ export type LoginAdminState = {
   error?: string;
 };
 
+export type AdminFormState = {
+  error?: string;
+  success?: string;
+};
+
 export async function loginAdmin(_: LoginAdminState, formData: FormData): Promise<LoginAdminState> {
   const email = formData.get("email");
   const password = formData.get("password");
@@ -82,7 +87,10 @@ export async function updateBookingStatus(id: number, status: string, is_read: b
   revalidatePath("/admin");
 }
 
-export async function createCategory(formData: FormData) {
+export async function createCategory(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
   const token = cookies().get("admin_token")?.value;
   const payload = {
     title: formData.get("title"),
@@ -98,13 +106,18 @@ export async function createCategory(formData: FormData) {
     },
     body: JSON.stringify(payload)
   });
+  const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error("Failed to create category");
+    return { error: data?.detail || "Не удалось создать категорию" };
   }
   revalidatePath("/admin/categories");
+  return { success: "Категория создана" };
 }
 
-export async function createService(formData: FormData) {
+export async function createService(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
   const token = cookies().get("admin_token")?.value;
   const payload = {
     category_id: Number(formData.get("category_id")),
@@ -115,6 +128,7 @@ export async function createService(formData: FormData) {
     duration_min: Number(formData.get("duration_min")),
     price_from: Number(formData.get("price_from")),
     price_to: formData.get("price_to") ? Number(formData.get("price_to")) : null,
+    discount_percent: formData.get("discount_percent") ? Number(formData.get("discount_percent")) : null,
     image_url: formData.get("image_url") || null,
     tags: (formData.get("tags") as string | null)?.split(",").map((tag) => tag.trim()).filter(Boolean) ?? [],
     is_active: formData.get("is_active") === "on",
@@ -132,7 +146,292 @@ export async function createService(formData: FormData) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.detail || "Failed to create service");
+    return { error: data?.detail || "Не удалось создать услугу" };
   }
   revalidatePath("/admin/services");
+  return { success: "Услуга создана" };
+}
+
+export async function updateCategory(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
+  const token = cookies().get("admin_token")?.value;
+  const id = Number(formData.get("id"));
+  const payload = {
+    title: formData.get("title"),
+    slug: formData.get("slug"),
+    sort_order: Number(formData.get("sort_order") || 0),
+    is_active: formData.get("is_active") === "on"
+  };
+  const response = await fetch(`${API_BASE_URL}/admin/categories/${id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: data?.detail || "Не удалось обновить категорию" };
+  }
+  revalidatePath("/admin/categories");
+  return { success: "Категория обновлена" };
+}
+
+export async function deleteCategory(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
+  const token = cookies().get("admin_token")?.value;
+  const id = Number(formData.get("id"));
+  const response = await fetch(`${API_BASE_URL}/admin/categories/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: data?.detail || "Не удалось удалить категорию" };
+  }
+  revalidatePath("/admin/categories");
+  return { success: "Категория удалена" };
+}
+
+export async function updateService(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
+  const token = cookies().get("admin_token")?.value;
+  const id = Number(formData.get("id"));
+  const slugValue = formData.get("slug");
+  const payload = {
+    category_id: Number(formData.get("category_id")),
+    title: formData.get("title"),
+    slug: slugValue ? String(slugValue) : undefined,
+    short_description: formData.get("short_description"),
+    description: formData.get("description"),
+    duration_min: Number(formData.get("duration_min")),
+    price_from: Number(formData.get("price_from")),
+    price_to: formData.get("price_to") ? Number(formData.get("price_to")) : null,
+    discount_percent: formData.get("discount_percent") ? Number(formData.get("discount_percent")) : null,
+    image_url: formData.get("image_url") || null,
+    tags: (formData.get("tags") as string | null)?.split(",").map((tag) => tag.trim()).filter(Boolean) ?? [],
+    is_active: formData.get("is_active") === "on",
+    sort_order: Number(formData.get("sort_order") || 0),
+    seo_title: formData.get("seo_title") || null,
+    seo_description: formData.get("seo_description") || null
+  };
+  const response = await fetch(`${API_BASE_URL}/admin/services/${id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: data?.detail || "Не удалось обновить услугу" };
+  }
+  revalidatePath("/admin/services");
+  revalidatePath(`/admin/services/${id}`);
+  return { success: "Услуга обновлена" };
+}
+
+export async function deleteService(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
+  const token = cookies().get("admin_token")?.value;
+  const id = Number(formData.get("id"));
+  const response = await fetch(`${API_BASE_URL}/admin/services/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: data?.detail || "Не удалось удалить услугу" };
+  }
+  revalidatePath("/admin/services");
+  return { success: "Услуга удалена" };
+}
+
+export async function createWeeklyRitual(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
+  const token = cookies().get("admin_token")?.value;
+  const payload = {
+    title: formData.get("title"),
+    slug: formData.get("slug") || null,
+    short_description: formData.get("short_description") || null,
+    description: formData.get("description"),
+    image_url: formData.get("image_url") || null,
+    cta_text: formData.get("cta_text") || null,
+    cta_url: formData.get("cta_url") || null,
+    start_date: formData.get("start_date") || null,
+    end_date: formData.get("end_date") || null,
+    is_active: formData.get("is_active") === "on",
+    sort_order: Number(formData.get("sort_order") || 0)
+  };
+  const response = await fetch(`${API_BASE_URL}/admin/weekly-rituals`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: data?.detail || "Не удалось создать ритуал" };
+  }
+  revalidatePath("/admin/weekly-rituals");
+  return { success: "Ритуал создан" };
+}
+
+export async function updateWeeklyRitual(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
+  const token = cookies().get("admin_token")?.value;
+  const id = Number(formData.get("id"));
+  const slugValue = formData.get("slug");
+  const payload = {
+    title: formData.get("title"),
+    slug: slugValue ? String(slugValue) : undefined,
+    short_description: formData.get("short_description") || null,
+    description: formData.get("description"),
+    image_url: formData.get("image_url") || null,
+    cta_text: formData.get("cta_text") || null,
+    cta_url: formData.get("cta_url") || null,
+    start_date: formData.get("start_date") || null,
+    end_date: formData.get("end_date") || null,
+    is_active: formData.get("is_active") === "on",
+    sort_order: Number(formData.get("sort_order") || 0)
+  };
+  const response = await fetch(`${API_BASE_URL}/admin/weekly-rituals/${id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: data?.detail || "Не удалось обновить ритуал" };
+  }
+  revalidatePath("/admin/weekly-rituals");
+  revalidatePath(`/admin/weekly-rituals/${id}`);
+  return { success: "Ритуал обновлён" };
+}
+
+export async function deleteWeeklyRitual(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
+  const token = cookies().get("admin_token")?.value;
+  const id = Number(formData.get("id"));
+  const response = await fetch(`${API_BASE_URL}/admin/weekly-rituals/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: data?.detail || "Не удалось удалить ритуал" };
+  }
+  revalidatePath("/admin/weekly-rituals");
+  return { success: "Ритуал удалён" };
+}
+
+export async function createReview(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
+  const token = cookies().get("admin_token")?.value;
+  const payload = {
+    author_name: formData.get("author_name"),
+    rating: formData.get("rating") ? Number(formData.get("rating")) : null,
+    text: formData.get("text"),
+    source: formData.get("source") || null,
+    source_url: formData.get("source_url") || null,
+    review_date: formData.get("review_date") || null,
+    is_published: formData.get("is_published") === "on",
+    sort_order: Number(formData.get("sort_order") || 0)
+  };
+  const response = await fetch(`${API_BASE_URL}/admin/reviews`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: data?.detail || "Не удалось создать отзыв" };
+  }
+  revalidatePath("/admin/reviews");
+  return { success: "Отзыв создан" };
+}
+
+export async function updateReview(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
+  const token = cookies().get("admin_token")?.value;
+  const id = Number(formData.get("id"));
+  const payload = {
+    author_name: formData.get("author_name"),
+    rating: formData.get("rating") ? Number(formData.get("rating")) : null,
+    text: formData.get("text"),
+    source: formData.get("source") || null,
+    source_url: formData.get("source_url") || null,
+    review_date: formData.get("review_date") || null,
+    is_published: formData.get("is_published") === "on",
+    sort_order: Number(formData.get("sort_order") || 0)
+  };
+  const response = await fetch(`${API_BASE_URL}/admin/reviews/${id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: data?.detail || "Не удалось обновить отзыв" };
+  }
+  revalidatePath("/admin/reviews");
+  revalidatePath(`/admin/reviews/${id}`);
+  return { success: "Отзыв обновлён" };
+}
+
+export async function deleteReview(
+  _prevState: AdminFormState,
+  formData: FormData
+): Promise<AdminFormState> {
+  const token = cookies().get("admin_token")?.value;
+  const id = Number(formData.get("id"));
+  const response = await fetch(`${API_BASE_URL}/admin/reviews/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: data?.detail || "Не удалось удалить отзыв" };
+  }
+  revalidatePath("/admin/reviews");
+  return { success: "Отзыв удалён" };
 }

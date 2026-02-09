@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_admin
 from app.core.security import create_access_token, verify_password
 from app.db import get_db
+from app.models import Admin
 from app.schemas import AdminLogin, AdminOut, Token
 
 router = APIRouter(prefix="/admin/auth", tags=["auth"])

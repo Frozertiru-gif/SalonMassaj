@@ -5,29 +5,34 @@ import { Badge } from "@/components/Badge";
 import { Card } from "@/components/Card";
 import { Container } from "@/components/Container";
 import { Section } from "@/components/Section";
-import { services } from "@/data/services";
+import { publicFetch } from "@/lib/api";
+import type { Service } from "@/lib/types";
 
 interface ServicePageProps {
   params: { slug: string };
 }
 
-export function generateMetadata({ params }: ServicePageProps): Metadata {
-  const service = services.find((item) => item.slug === params.slug);
-
-  if (!service) {
+export async function generateMetadata({ params }: ServicePageProps): Promise<Metadata> {
+  try {
+    const service = await publicFetch<Service>(`/public/services/${params.slug}`);
+    return {
+      title: `${service.title} — Salon Massaj`,
+      description: service.short_description
+    };
+  } catch {
     return {
       title: "Услуга не найдена — Salon Massaj"
     };
   }
-
-  return {
-    title: `${service.title} — Salon Massaj`,
-    description: service.shortDescription
-  };
 }
 
-export default function ServicePage({ params }: ServicePageProps) {
-  const service = services.find((item) => item.slug === params.slug);
+export default async function ServicePage({ params }: ServicePageProps) {
+  let service: Service | null = null;
+  try {
+    service = await publicFetch<Service>(`/public/services/${params.slug}`);
+  } catch {
+    service = null;
+  }
 
   if (!service) {
     notFound();
@@ -38,14 +43,14 @@ export default function ServicePage({ params }: ServicePageProps) {
       <Container className="space-y-10">
         <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-6">
-            <Badge>{service.category}</Badge>
+            <Badge>{service.category?.title ?? "Услуга"}</Badge>
             <div className="space-y-3">
               <h1 className="text-4xl font-semibold text-ink-900">{service.title}</h1>
               <p className="text-base text-ink-700">{service.description}</p>
             </div>
             <div className="flex flex-wrap gap-4 text-sm text-ink-700">
-              <span>⏳ {service.durationMin} минут</span>
-              <span>💗 от {service.priceFrom.toLocaleString("ru-RU")} ₽</span>
+              <span>⏳ {service.duration_min} минут</span>
+              <span>💗 от {service.price_from.toLocaleString("ru-RU")} ₽</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {service.tags.map((tag) => (
@@ -54,7 +59,7 @@ export default function ServicePage({ params }: ServicePageProps) {
                 </span>
               ))}
             </div>
-            <Button href={`/?service=${encodeURIComponent(service.title)}#booking`}>Записаться</Button>
+            <Button href={`/?service=${encodeURIComponent(service.slug)}#booking`}>Записаться</Button>
           </div>
           <Card className="h-80">
             <div className="flex h-full items-center justify-center rounded-2xl bg-gradient-to-br from-blush-100 via-white to-blush-50 text-sm text-blush-500">

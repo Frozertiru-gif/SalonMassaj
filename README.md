@@ -1,73 +1,85 @@
 # SalonMassaj
 
-## Описание проекта
+Полноценное приложение салона массажа: публичный сайт + API + админка.
 
-Тестовый дизайн сайта салона массажа.
+## Стек
 
-Технологии: Next.js + TypeScript + Tailwind.
+- `/web` — Next.js (App Router, TS, Tailwind)
+- `/api` — FastAPI (async SQLAlchemy, Alembic, JWT)
+- Postgres (Docker)
 
-Пока без бэкенда и админки (только мок-данные).
-
-## Требования
-
-- Node.js 18+
-- npm
-
-## Установка и запуск локально
-
-1. Клонировать репозиторий:
-
-   ```bash
-   git clone https://github.com/SalonMassaj/SalonMassaj.git
-   ```
-
-2. Перейти в папку проекта:
-
-   ```bash
-   cd SalonMassaj
-   ```
-
-3. Установить зависимости:
-
-   ```bash
-   npm install
-   ```
-
-4. Запустить dev-сервер:
-
-   ```bash
-   npm run dev
-   ```
-
-Сайт будет доступен по адресу: http://localhost:3000
-
-## Сборка для продакшена
+## Быстрый старт (Docker Compose)
 
 ```bash
-npm run build
-npm start
+docker compose up --build
 ```
 
-## Структура проекта
+- Web: http://localhost:3000
+- API: http://localhost:8000
 
-- `src/app` — страницы
-- `src/components` — UI-компоненты
-- `src/data` — мок-данные (услуги, отзывы)
-- `public` — изображения
+### Миграции Alembic
 
-## Как менять услуги
+```bash
+cd api
+alembic upgrade head
+```
 
-1. Откройте файл `src/data/services.ts`.
-2. Добавьте новый объект услуги.
-3. Заполните поля: `title`, `slug`, `description`, `priceFrom` и т.д.
-4. После сохранения сайт обновится автоматически.
+### Seed администратора и базовых настроек
 
-## Как менять цвета
+```bash
+cd api
+python -m app.scripts.seed
+```
 
-Цвета настраиваются в `tailwind.config.ts` или в глобальных стилях.
+По умолчанию создаётся админ:
+- email: `owner@example.com`
+- пароль: `owner123`
 
-## Важно
+## Локальный запуск без Docker
 
-- Это дизайн-прототип.
-- Бэкенд, админка и база данных будут добавлены позже.
-- Архитектура уже подготовлена для подключения API.
+### API
+
+```bash
+cd api
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+alembic upgrade head
+python -m app.scripts.seed
+uvicorn app.main:app --reload
+```
+
+### Web
+
+```bash
+cd web
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+## Переменные окружения
+
+### `/api/.env`
+
+Смотрите `.env.example`:
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `JWT_EXPIRES_MINUTES`
+- `TELEGRAM_BOT_TOKEN`
+
+### `/web/.env.local`
+
+Смотрите `.env.example`:
+- `NEXT_PUBLIC_API_URL`
+- `API_URL`
+
+## Админка
+
+URL: http://localhost:3000/admin/login
+
+Возможности:
+- управление услугами и категориями
+- просмотр записей, смена статуса/прочитано
+- настройка расписания, правил записи, контактов, Telegram-уведомлений

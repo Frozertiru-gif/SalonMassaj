@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: salon
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  api:
+    build:
+      context: ./api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/salon
+      JWT_SECRET: dev-secret
+      JWT_EXPIRES_MINUTES: 60
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+    depends_on:
+      - db
+    volumes:
+      - ./api:/app
+    ports:
+      - "8000:8000"
+
+  web:
+    image: node:20
+    working_dir: /app
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      API_URL: http://api:8000
+    volumes:
+      - ./web:/app
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  db_data:

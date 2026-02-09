@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { ReactNode } from "react";
 import { Button } from "@/components/Button";
 import { Container } from "@/components/Container";
-import { API_BASE_URL, logoutAdmin } from "../actions";
+import { logoutAdmin } from "../actions";
+import { API_BASE_URL } from "../adminApi";
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const token = cookies().get("admin_token")?.value;

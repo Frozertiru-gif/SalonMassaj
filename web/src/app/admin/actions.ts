@@ -3,9 +3,8 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-
-export const API_BASE_URL =
-  process.env.API_INTERNAL_BASE_URL ?? process.env.API_URL ?? "http://localhost:8000";
+import { API_BASE_URL } from "./adminApi";
+import type { AdminFormState, LoginAdminState } from "./types";
 const UNAUTHORIZED_STATUSES = new Set([401, 403]);
 const SESSION_EXPIRED_MESSAGE = "Сессия истекла. Войдите снова.";
 
@@ -37,15 +36,6 @@ function mapAdminErrorDetail(detail?: string) {
   }
   return detail;
 }
-
-export type LoginAdminState = {
-  error?: string;
-};
-
-export type AdminFormState = {
-  error?: string;
-  success?: string;
-};
 
 export async function loginAdmin(_: LoginAdminState, formData: FormData): Promise<LoginAdminState> {
   const email = formData.get("email");

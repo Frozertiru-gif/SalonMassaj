@@ -2,7 +2,7 @@
 
 import { useFormState } from "react-dom";
 import { Button } from "@/components/Button";
-import type { AdminFormState } from "../../actions";
+import type { AdminFormState } from "../../types";
 import { deleteReview } from "../../actions";
 
 type ReviewDeleteFormProps = {

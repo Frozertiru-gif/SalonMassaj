@@ -27,6 +27,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - ./api:/app
     ports:
@@ -38,6 +40,35 @@ services:
       timeout: 3s
       retries: 20
       start_period: 10s
+
+  migrate:
+    build:
+      context: ./api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/salon
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./api:/app
+    command: sh -c "alembic upgrade head"
+
+  seed:
+    build:
+      context: ./api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/salon
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SEED_ADMIN: ${SEED_ADMIN:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./api:/app
+    command: sh -c "python -m app.scripts.seed_admin"
 
   web:
     image: node:20

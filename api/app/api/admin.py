@@ -86,6 +86,13 @@ def slug_candidates(base_slug: str):
         suffix += 1
 
 
+def pick_unique_slug(base_slug: str, existing_slugs: set[str]) -> str:
+    for candidate in slug_candidates(base_slug):
+        if candidate not in existing_slugs:
+            return candidate
+    return base_slug
+
+
 @router.get("/services", response_model=list[ServiceOut])
 async def list_services(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Service).options(selectinload(Service.category)).order_by(Service.sort_order, Service.title))
@@ -100,26 +107,25 @@ async def create_service(payload: ServiceCreate, db: AsyncSession = Depends(get_
     if not base_slug:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Slug cannot be empty")
 
-    candidates = [base_slug] if raw_slug else slug_candidates(base_slug)
-    for candidate in candidates:
-        payload_data["slug"] = candidate
-        try:
-            async with db.begin():
-                service = Service(**payload_data)
-                db.add(service)
-                await db.flush()
-                result = await db.execute(
-                    select(Service).options(selectinload(Service.category)).where(Service.id == service.id)
-                )
-                service_out = ServiceOut.model_validate(result.scalar_one())
-            return service_out
-        except IntegrityError as exc:
-            if raw_slug:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists"
-                ) from exc
-            continue
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists")
+    existing_slugs = set(
+        (await db.execute(select(Service.slug).where(Service.slug.like(f"{base_slug}%")))).scalars().all()
+    )
+    if raw_slug:
+        if base_slug in existing_slugs:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists")
+        payload_data["slug"] = base_slug
+    else:
+        payload_data["slug"] = pick_unique_slug(base_slug, existing_slugs)
+
+    try:
+        service = Service(**payload_data)
+        db.add(service)
+        await db.flush()
+        result = await db.execute(select(Service).options(selectinload(Service.category)).where(Service.id == service.id))
+        service_out = ServiceOut.model_validate(result.scalar_one())
+    except IntegrityError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists") from exc
+    return service_out
 
 
 @router.put("/services/{service_id}", response_model=ServiceOut)

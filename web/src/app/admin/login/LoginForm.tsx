@@ -2,7 +2,8 @@
 
 import { useFormState, useFormStatus } from "react-dom";
 
-import { loginAdmin, type LoginAdminState } from "../actions";
+import { loginAdmin } from "../actions";
+import type { LoginAdminState } from "../types";
 import { Button } from "@/components/Button";
 
 const initialState: LoginAdminState = {};

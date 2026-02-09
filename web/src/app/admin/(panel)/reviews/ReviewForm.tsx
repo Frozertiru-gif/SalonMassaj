@@ -4,7 +4,7 @@ import { useFormState } from "react-dom";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import type { Review } from "@/lib/types";
-import type { AdminFormState } from "../../actions";
+import type { AdminFormState } from "../../types";
 
 type ReviewFormProps = {
   action: (prevState: AdminFormState, formData: FormData) => Promise<AdminFormState>;

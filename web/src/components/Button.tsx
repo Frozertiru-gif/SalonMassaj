@@ -13,7 +13,8 @@ type ButtonProps = {
 };
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: "bg-blush-500 text-white hover:bg-blush-600 shadow-soft",
+  primary:
+    "bg-gradient-to-r from-blush-400 via-blush-500 to-peach-300 text-white shadow-soft hover:from-blush-500 hover:via-blush-600 hover:to-peach-400",
   secondary: "bg-white text-blush-700 border border-blush-200 hover:border-blush-300",
   ghost: "text-ink-700 hover:text-blush-700"
 };

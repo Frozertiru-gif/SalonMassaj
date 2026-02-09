@@ -71,7 +71,7 @@ export default function HomePage() {
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
   const [formSent, setFormSent] = useState(false);
 
-  const servicesPreview = useMemo(() => services.slice(0, 8), [services]);
+  const servicesPreview = useMemo(() => services.slice(0, 12), [services]);
 
   useEffect(() => {
     const fetchServices = async () => {
@@ -255,6 +255,9 @@ export default function HomePage() {
             <div>
               <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Каталог SlimFox</p>
               <h2 className="mt-3 text-3xl font-semibold text-ink-900">Мы предлагаем не процедуры, а искусство преображения.</h2>
+              <p className="mt-3 text-sm text-ink-600">
+                Полный каталог доступен на странице «Смотреть все», если вы не нашли нужную услугу в блоке ниже.
+              </p>
             </div>
             <Button href="/services" variant="ghost" className="hidden sm:inline-flex">
               Смотреть все →

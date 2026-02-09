@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -56,6 +56,7 @@ class ServiceBase(BaseModel):
     duration_min: int
     price_from: int
     price_to: int | None = None
+    discount_percent: int | None = Field(default=None, ge=0, le=100)
     image_url: str | None = None
     tags: list[str] = Field(default_factory=list)
     is_active: bool = True
@@ -77,6 +78,7 @@ class ServiceUpdate(BaseModel):
     duration_min: int | None = None
     price_from: int | None = None
     price_to: int | None = None
+    discount_percent: int | None = Field(default=None, ge=0, le=100)
     image_url: str | None = None
     tags: list[str] | None = None
     is_active: bool | None = None
@@ -92,6 +94,79 @@ class ServiceOut(ServiceBase):
     created_at: datetime
     updated_at: datetime
     category: ServiceCategoryOut | None = None
+
+
+class WeeklyRitualBase(BaseModel):
+    title: str
+    slug: str | None = None
+    short_description: str | None = None
+    description: str
+    image_url: str | None = None
+    cta_text: str | None = None
+    cta_url: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    is_active: bool = True
+    sort_order: int = 0
+
+
+class WeeklyRitualCreate(WeeklyRitualBase):
+    pass
+
+
+class WeeklyRitualUpdate(BaseModel):
+    title: str | None = None
+    slug: str | None = None
+    short_description: str | None = None
+    description: str | None = None
+    image_url: str | None = None
+    cta_text: str | None = None
+    cta_url: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
+
+
+class WeeklyRitualOut(WeeklyRitualBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ReviewBase(BaseModel):
+    author_name: str
+    rating: int | None = Field(default=None, ge=1, le=5)
+    text: str
+    source: str | None = None
+    source_url: str | None = None
+    review_date: date | None = None
+    is_published: bool = True
+    sort_order: int = 0
+
+
+class ReviewCreate(ReviewBase):
+    pass
+
+
+class ReviewUpdate(BaseModel):
+    author_name: str | None = None
+    rating: int | None = Field(default=None, ge=1, le=5)
+    text: str | None = None
+    source: str | None = None
+    source_url: str | None = None
+    review_date: date | None = None
+    is_published: bool | None = None
+    sort_order: int | None = None
+
+
+class ReviewOut(ReviewBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
 
 
 class SettingOut(BaseModel):

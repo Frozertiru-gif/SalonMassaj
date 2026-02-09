@@ -6,6 +6,7 @@ import { Card } from "@/components/Card";
 import { Container } from "@/components/Container";
 import { Section } from "@/components/Section";
 import { publicFetch } from "@/lib/api";
+import { formatPrice, getDiscountedPrice } from "@/lib/pricing";
 import type { Service } from "@/lib/types";
 
 interface ServicePageProps {
@@ -38,6 +39,9 @@ export default async function ServicePage({ params }: ServicePageProps) {
     notFound();
   }
 
+  const discountedFrom = getDiscountedPrice(service.price_from, service.discount_percent);
+  const hasDiscount = service.discount_percent && service.discount_percent > 0;
+
   return (
     <Section className="pt-12">
       <Container className="space-y-10">
@@ -50,7 +54,12 @@ export default async function ServicePage({ params }: ServicePageProps) {
             </div>
             <div className="flex flex-wrap gap-4 text-sm text-ink-700">
               <span>⏳ {service.duration_min} минут</span>
-              <span>💗 от {service.price_from.toLocaleString("ru-RU")} ₽</span>
+              <span className="flex items-center gap-2">
+                💗 от {formatPrice(discountedFrom)} ₽
+                {hasDiscount ? (
+                  <span className="text-xs text-ink-400 line-through">от {formatPrice(service.price_from)} ₽</span>
+                ) : null}
+              </span>
             </div>
             <div className="flex flex-wrap gap-2">
               {service.tags.map((tag) => (

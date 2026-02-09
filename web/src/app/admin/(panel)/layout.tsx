@@ -29,6 +29,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <Button href="/admin/categories" variant="ghost">
               Категории
             </Button>
+            <Button href="/admin/weekly-rituals" variant="ghost">
+              Ритуал недели
+            </Button>
+            <Button href="/admin/reviews" variant="ghost">
+              Отзывы
+            </Button>
             <Button href="/admin/bookings" variant="ghost">
               Записи
             </Button>

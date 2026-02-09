@@ -11,11 +11,17 @@
 ## Быстрый старт (Docker Compose)
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
 - Web: http://localhost:3000
 - API: http://localhost:8000
+
+### Проверка здоровья API
+
+```bash
+curl http://localhost:8000/health
+```
 
 ### Миграции Alembic
 
@@ -61,7 +67,7 @@ npm run dev
 
 ## Переменные окружения
 
-### `/api/.env`
+### `/api/.env` (локальный запуск)
 
 Смотрите `.env.example`:
 - `DATABASE_URL`
@@ -69,11 +75,16 @@ npm run dev
 - `JWT_EXPIRES_MINUTES`
 - `TELEGRAM_BOT_TOKEN`
 
-### `/web/.env.local`
+### `/web/.env.local` (локальный запуск)
 
 Смотрите `.env.example`:
-- `NEXT_PUBLIC_API_URL`
-- `API_URL`
+- `API_INTERNAL_BASE_URL`
+
+### Docker Compose (.env в корне проекта)
+
+Минимум:
+- `TELEGRAM_BOT_TOKEN`
+- `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 
 ## Админка
 

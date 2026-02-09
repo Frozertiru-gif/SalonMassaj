@@ -11,8 +11,6 @@ import { ReviewCard } from "@/components/ReviewCard";
 import { reviews } from "@/data/reviews";
 import type { AvailabilitySlot, Service } from "@/lib/types";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 const advantages = [
   { title: "Персональные ритуалы", text: "Подбираем технику и масла под ваше состояние.", icon: "🌸" },
   { title: "Премиальные материалы", text: "Органические масла и тёплые текстуры.", icon: "🕯️" },
@@ -36,19 +34,32 @@ export default function HomePage() {
 
   useEffect(() => {
     const fetchServices = async () => {
-      const response = await fetch(`${API_BASE_URL}/public/services`);
-      if (!response.ok) return;
-      const data = (await response.json()) as Service[];
-      setServices(data);
+      try {
+        const response = await fetch("/api/public/services");
+        if (!response.ok) {
+          setServices([]);
+          return;
+        }
+        const data = (await response.json()) as Service[];
+        setServices(data);
+      } catch (error) {
+        setServices([]);
+      }
     };
     const fetchContacts = async () => {
-      const response = await fetch(`${API_BASE_URL}/public/settings/contacts`);
-      if (!response.ok) return;
-      const data = (await response.json()) as { value_jsonb: { phone?: string; address?: string } };
-      setContacts((prev) => ({
-        phone: data.value_jsonb.phone ?? prev.phone,
-        address: data.value_jsonb.address ?? prev.address
-      }));
+      try {
+        const response = await fetch("/api/public/settings/contacts");
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as { value_jsonb: { phone?: string; address?: string } };
+        setContacts((prev) => ({
+          phone: data.value_jsonb.phone ?? prev.phone,
+          address: data.value_jsonb.address ?? prev.address
+        }));
+      } catch (error) {
+        return;
+      }
     };
     fetchServices();
     fetchContacts();
@@ -66,12 +77,19 @@ export default function HomePage() {
         return;
       }
       setSelectedSlot("");
-      const response = await fetch(
-        `${API_BASE_URL}/public/availability?service_id=${selectedServiceId}&date=${selectedDate}`
-      );
-      if (!response.ok) return;
-      const data = (await response.json()) as { slots: AvailabilitySlot[] };
-      setSlots(data.slots);
+      try {
+        const response = await fetch(
+          `/api/public/availability?service_id=${selectedServiceId}&date=${selectedDate}`
+        );
+        if (!response.ok) {
+          setSlots([]);
+          return;
+        }
+        const data = (await response.json()) as { slots: AvailabilitySlot[] };
+        setSlots(data.slots);
+      } catch (error) {
+        setSlots([]);
+      }
     };
     fetchSlots();
   }, [selectedServiceId, selectedDate]);
@@ -89,14 +107,18 @@ export default function HomePage() {
       starts_at: selectedSlot,
       comment: formData.get("comment")
     };
-    const response = await fetch(`${API_BASE_URL}/public/bookings`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (response.ok) {
-      setFormSent(true);
-      setTimeout(() => setFormSent(false), 4000);
+    try {
+      const response = await fetch("/api/public/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (response.ok) {
+        setFormSent(true);
+        setTimeout(() => setFormSent(false), 4000);
+      }
+    } catch (error) {
+      return;
     }
   };
 

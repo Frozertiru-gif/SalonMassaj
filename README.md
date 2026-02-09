@@ -29,6 +29,8 @@ curl http://localhost:8000/health
 docker compose run --rm migrate
 ```
 
+Alembic использует синхронный драйвер (psycopg2), поэтому `psycopg2-binary` установлен в `api/requirements.txt`.
+
 ### Seed администратора (dev)
 
 ```bash

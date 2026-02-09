@@ -44,7 +44,10 @@ export function ServiceCard({ service }: ServiceCardProps) {
       </div>
       <div className="mt-auto flex items-center justify-between text-sm text-ink-700">
         <span>{service.duration_min} мин</span>
-        <Link href={`/services/${service.slug}`} className="font-medium text-blush-600 hover:text-blush-700">
+        <Link
+          href={`/services/${encodeURIComponent(service.slug)}`}
+          className="font-medium text-blush-600 hover:text-blush-700"
+        >
           Подробнее
         </Link>
       </div>

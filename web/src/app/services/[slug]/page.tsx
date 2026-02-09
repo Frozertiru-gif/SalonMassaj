@@ -15,7 +15,8 @@ interface ServicePageProps {
 
 export async function generateMetadata({ params }: ServicePageProps): Promise<Metadata> {
   try {
-    const service = await publicFetch<Service>(`/public/services/${params.slug}`);
+    const encodedSlug = encodeURIComponent(params.slug);
+    const service = await publicFetch<Service>(`/public/services/${encodedSlug}`);
     return {
       title: `${service.title} — Salon Massaj`,
       description: service.short_description
@@ -30,7 +31,8 @@ export async function generateMetadata({ params }: ServicePageProps): Promise<Me
 export default async function ServicePage({ params }: ServicePageProps) {
   let service: Service | null = null;
   try {
-    service = await publicFetch<Service>(`/public/services/${params.slug}`);
+    const encodedSlug = encodeURIComponent(params.slug);
+    service = await publicFetch<Service>(`/public/services/${encodedSlug}`);
   } catch {
     service = null;
   }

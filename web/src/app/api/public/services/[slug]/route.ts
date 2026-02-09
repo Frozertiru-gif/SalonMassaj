@@ -1,11 +1,12 @@
 import { proxyGet } from "@/app/api/proxy";
 
-interface RouteParams {
+type RouteContext = {
   params: {
     slug: string;
   };
-}
+};
 
-export async function GET(request: Request, { params }: RouteParams) {
-  return proxyGet(request, `/public/services/${params.slug}`);
+export async function GET(request: Request, context: RouteContext) {
+  const { slug } = context.params;
+  return proxyGet(request, `/public/services/${encodeURIComponent(slug)}`);
 }

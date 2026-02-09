@@ -29,7 +29,8 @@ export async function adminFetch<T>(path: string, init?: RequestInit): Promise<T
     cache: "no-store"
   });
   if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.detail || `API error: ${response.status}`);
   }
   return (await response.json()) as T;
 }

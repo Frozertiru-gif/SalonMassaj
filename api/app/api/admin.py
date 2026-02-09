@@ -32,25 +32,57 @@ from app.schemas import (
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
 
 
+CYRILLIC_TRANSLIT = {
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "e",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "kh",
+    "ц": "ts",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "shch",
+    "ъ": "",
+    "ы": "y",
+    "ь": "",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
+}
+
+
 def normalize_slug(value: str) -> str:
-    slug = value.strip().lower()
-    slug = re.sub(r"[^\w\s-]", "", slug, flags=re.U)
-    slug = re.sub(r"[\s_-]+", "-", slug, flags=re.U)
+    value = value.strip().lower()
+    transliterated = "".join(CYRILLIC_TRANSLIT.get(char, char) for char in value)
+    slug = re.sub(r"[^a-z0-9\s-]", "", transliterated)
+    slug = re.sub(r"[\s_-]+", "-", slug)
     slug = slug.strip("-")
     return slug or "service"
 
 
-async def slug_exists(db: AsyncSession, slug: str) -> bool:
-    result = await db.execute(select(Service.id).where(Service.slug == slug))
-    return result.scalar_one_or_none() is not None
-
-
-async def generate_unique_slug(db: AsyncSession, base_slug: str) -> str:
-    suffix = 0
+def slug_candidates(base_slug: str):
+    yield base_slug
+    suffix = 2
     while True:
-        candidate = base_slug if suffix == 0 else f"{base_slug}-{suffix}"
-        if not await slug_exists(db, candidate):
-            return candidate
+        yield f"{base_slug}-{suffix}"
         suffix += 1
 
 
@@ -63,24 +95,31 @@ async def list_services(db: AsyncSession = Depends(get_db)):
 @router.post("/services", response_model=ServiceOut)
 async def create_service(payload: ServiceCreate, db: AsyncSession = Depends(get_db)):
     payload_data = payload.model_dump()
-    raw_slug = payload.slug or ""
-    base_slug = normalize_slug(raw_slug or payload.title)
-    if raw_slug:
-        if await slug_exists(db, base_slug):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists")
-        payload_data["slug"] = base_slug
-    else:
-        payload_data["slug"] = await generate_unique_slug(db, base_slug)
+    raw_slug = payload.slug
+    base_slug = normalize_slug((raw_slug or payload.title) or "")
+    if not base_slug:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Slug cannot be empty")
 
-    service = Service(**payload_data)
-    db.add(service)
-    try:
-        await db.commit()
-    except IntegrityError as exc:
-        await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists") from exc
-    await db.refresh(service)
-    return service
+    candidates = [base_slug] if raw_slug else slug_candidates(base_slug)
+    for candidate in candidates:
+        payload_data["slug"] = candidate
+        try:
+            async with db.begin():
+                service = Service(**payload_data)
+                db.add(service)
+                await db.flush()
+                result = await db.execute(
+                    select(Service).options(selectinload(Service.category)).where(Service.id == service.id)
+                )
+                service_out = ServiceOut.model_validate(result.scalar_one())
+            return service_out
+        except IntegrityError as exc:
+            if raw_slug:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists"
+                ) from exc
+            continue
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists")
 
 
 @router.put("/services/{service_id}", response_model=ServiceOut)

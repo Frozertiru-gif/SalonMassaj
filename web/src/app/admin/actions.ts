@@ -147,7 +147,6 @@ export async function createService(
   const payload = {
     category_id: Number(formData.get("category_id")),
     title: formData.get("title"),
-    slug: formData.get("slug"),
     short_description: formData.get("short_description"),
     description: formData.get("description"),
     duration_min: Number(formData.get("duration_min")),

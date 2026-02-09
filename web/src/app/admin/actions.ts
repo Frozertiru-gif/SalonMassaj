@@ -130,8 +130,9 @@ export async function createService(formData: FormData) {
     },
     body: JSON.stringify(payload)
   });
+  const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error("Failed to create service");
+    throw new Error(data?.detail || "Failed to create service");
   }
   revalidatePath("/admin/services");
 }

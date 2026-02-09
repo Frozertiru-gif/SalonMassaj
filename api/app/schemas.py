@@ -65,7 +65,7 @@ class ServiceBase(BaseModel):
 
 
 class ServiceCreate(ServiceBase):
-    pass
+    slug: str | None = None
 
 
 class ServiceUpdate(BaseModel):
@@ -97,7 +97,7 @@ class ServiceOut(ServiceBase):
 class SettingOut(BaseModel):
     key: str
     value_jsonb: dict[str, Any]
-    updated_at: datetime
+    updated_at: datetime | None = None
 
 
 class SettingUpdate(BaseModel):

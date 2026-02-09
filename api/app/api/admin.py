@@ -1,5 +1,8 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +26,28 @@ from app.schemas import (
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
 
 
+def normalize_slug(value: str) -> str:
+    slug = value.strip().lower()
+    slug = re.sub(r"[^\w\s-]", "", slug, flags=re.U)
+    slug = re.sub(r"[\s_-]+", "-", slug, flags=re.U)
+    slug = slug.strip("-")
+    return slug or "service"
+
+
+async def slug_exists(db: AsyncSession, slug: str) -> bool:
+    result = await db.execute(select(Service.id).where(Service.slug == slug))
+    return result.scalar_one_or_none() is not None
+
+
+async def generate_unique_slug(db: AsyncSession, base_slug: str) -> str:
+    suffix = 0
+    while True:
+        candidate = base_slug if suffix == 0 else f"{base_slug}-{suffix}"
+        if not await slug_exists(db, candidate):
+            return candidate
+        suffix += 1
+
+
 @router.get("/services", response_model=list[ServiceOut])
 async def list_services(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Service).options(selectinload(Service.category)).order_by(Service.sort_order, Service.title))
@@ -31,9 +56,23 @@ async def list_services(db: AsyncSession = Depends(get_db)):
 
 @router.post("/services", response_model=ServiceOut)
 async def create_service(payload: ServiceCreate, db: AsyncSession = Depends(get_db)):
-    service = Service(**payload.model_dump())
+    payload_data = payload.model_dump()
+    raw_slug = payload.slug or ""
+    base_slug = normalize_slug(raw_slug or payload.title)
+    if raw_slug:
+        if await slug_exists(db, base_slug):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists")
+        payload_data["slug"] = base_slug
+    else:
+        payload_data["slug"] = await generate_unique_slug(db, base_slug)
+
+    service = Service(**payload_data)
     db.add(service)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists") from exc
     await db.refresh(service)
     return service
 
@@ -108,7 +147,7 @@ async def get_setting(key: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Setting).where(Setting.key == key))
     setting = result.scalar_one_or_none()
     if not setting:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Setting not found")
+        return {"key": key, "value_jsonb": {}, "updated_at": None}
     return setting
 
 

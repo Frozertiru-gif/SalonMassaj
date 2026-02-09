@@ -1,0 +1,49 @@
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { ReactNode } from "react";
+import { Button } from "@/components/Button";
+import { Container } from "@/components/Container";
+import { logoutAdmin } from "../actions";
+
+export default function AdminLayout({ children }: { children: ReactNode }) {
+  const token = cookies().get("admin_token")?.value;
+  if (!token) {
+    redirect("/admin/login");
+  }
+
+  return (
+    <div className="min-h-screen bg-blush-50/40">
+      <header className="border-b border-blush-100 bg-white">
+        <Container className="flex flex-wrap items-center justify-between gap-4 py-4">
+          <div>
+            <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Админка</p>
+            <h1 className="text-xl font-semibold text-ink-900">Salon Massaj</h1>
+          </div>
+          <nav className="flex flex-wrap gap-3 text-sm">
+            <Button href="/admin" variant="ghost">
+              Дашборд
+            </Button>
+            <Button href="/admin/services" variant="ghost">
+              Услуги
+            </Button>
+            <Button href="/admin/categories" variant="ghost">
+              Категории
+            </Button>
+            <Button href="/admin/bookings" variant="ghost">
+              Записи
+            </Button>
+            <Button href="/admin/settings" variant="ghost">
+              Настройки
+            </Button>
+          </nav>
+          <form action={logoutAdmin}>
+            <Button type="submit" variant="secondary">
+              Выйти
+            </Button>
+          </form>
+        </Container>
+      </header>
+      <main className="py-8">{children}</main>
+    </div>
+  );
+}

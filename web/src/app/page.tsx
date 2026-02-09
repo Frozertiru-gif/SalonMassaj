@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -8,8 +8,10 @@ import { Container } from "@/components/Container";
 import { Section } from "@/components/Section";
 import { ServiceCard } from "@/components/ServiceCard";
 import { ReviewCard } from "@/components/ReviewCard";
-import { services } from "@/data/services";
 import { reviews } from "@/data/reviews";
+import type { AvailabilitySlot, Service } from "@/lib/types";
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const advantages = [
   { title: "Персональные ритуалы", text: "Подбираем технику и масла под ваше состояние.", icon: "🌸" },
@@ -21,15 +23,81 @@ const advantages = [
 export default function HomePage() {
   const searchParams = useSearchParams();
   const initialService = searchParams.get("service") ?? "";
-  const [selectedService, setSelectedService] = useState(initialService);
+  const [services, setServices] = useState<Service[]>([]);
+  const [contacts, setContacts] = useState({ phone: "+7 (999) 123-45-67", address: "Москва, ул. Пудровая, 12" });
+  const [selectedService, setSelectedService] = useState<string>(initialService);
+  const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>("");
+  const [selectedSlot, setSelectedSlot] = useState<string>("");
+  const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
   const [formSent, setFormSent] = useState(false);
 
-  const servicesPreview = useMemo(() => services.slice(0, 8), []);
+  const servicesPreview = useMemo(() => services.slice(0, 8), [services]);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    const fetchServices = async () => {
+      const response = await fetch(`${API_BASE_URL}/public/services`);
+      if (!response.ok) return;
+      const data = (await response.json()) as Service[];
+      setServices(data);
+    };
+    const fetchContacts = async () => {
+      const response = await fetch(`${API_BASE_URL}/public/settings/contacts`);
+      if (!response.ok) return;
+      const data = (await response.json()) as { value_jsonb: { phone?: string; address?: string } };
+      setContacts((prev) => ({
+        phone: data.value_jsonb.phone ?? prev.phone,
+        address: data.value_jsonb.address ?? prev.address
+      }));
+    };
+    fetchServices();
+    fetchContacts();
+  }, []);
+
+  useEffect(() => {
+    const match = services.find((service) => service.slug === selectedService);
+    setSelectedServiceId(match?.id ?? null);
+  }, [selectedService, services]);
+
+  useEffect(() => {
+    const fetchSlots = async () => {
+      if (!selectedServiceId || !selectedDate) {
+        setSlots([]);
+        return;
+      }
+      setSelectedSlot("");
+      const response = await fetch(
+        `${API_BASE_URL}/public/availability?service_id=${selectedServiceId}&date=${selectedDate}`
+      );
+      if (!response.ok) return;
+      const data = (await response.json()) as { slots: AvailabilitySlot[] };
+      setSlots(data.slots);
+    };
+    fetchSlots();
+  }, [selectedServiceId, selectedDate]);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setFormSent(true);
-    setTimeout(() => setFormSent(false), 4000);
+    if (!selectedServiceId || !selectedSlot) {
+      return;
+    }
+    const formData = new FormData(event.currentTarget);
+    const payload = {
+      client_name: formData.get("name"),
+      client_phone: formData.get("phone"),
+      service_id: selectedServiceId,
+      starts_at: selectedSlot,
+      comment: formData.get("comment")
+    };
+    const response = await fetch(`${API_BASE_URL}/public/bookings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (response.ok) {
+      setFormSent(true);
+      setTimeout(() => setFormSent(false), 4000);
+    }
   };
 
   return (
@@ -157,8 +225,8 @@ export default function HomePage() {
               время.
             </p>
             <div className="mt-6 space-y-3 text-sm text-ink-700">
-              <p>📞 +7 (999) 123-45-67</p>
-              <p>📍 Москва, ул. Пудровая, 12</p>
+              <p>📞 {contacts.phone}</p>
+              <p>📍 {contacts.address}</p>
               <p>🕒 Ежедневно 10:00–21:00</p>
             </div>
           </div>
@@ -167,6 +235,7 @@ export default function HomePage() {
               <div>
                 <label className="text-xs font-medium text-ink-700">Имя</label>
                 <input
+                  name="name"
                   required
                   className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
                   placeholder="Ваше имя"
@@ -175,6 +244,7 @@ export default function HomePage() {
               <div>
                 <label className="text-xs font-medium text-ink-700">Телефон</label>
                 <input
+                  name="phone"
                   required
                   className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
                   placeholder="+7 (___) ___-__-__"
@@ -189,8 +259,34 @@ export default function HomePage() {
                 >
                   <option value="">Выберите услугу</option>
                   {services.map((service) => (
-                    <option key={service.slug} value={service.title}>
+                    <option key={service.slug} value={service.slug}>
                       {service.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-ink-700">Дата</label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(event) => setSelectedDate(event.target.value)}
+                  required
+                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-ink-700">Время</label>
+                <select
+                  value={selectedSlot}
+                  onChange={(event) => setSelectedSlot(event.target.value)}
+                  required
+                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
+                >
+                  <option value="">Выберите время</option>
+                  {slots.map((slot) => (
+                    <option key={slot.starts_at} value={slot.starts_at}>
+                      {new Date(slot.starts_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
                     </option>
                   ))}
                 </select>
@@ -198,6 +294,7 @@ export default function HomePage() {
               <div>
                 <label className="text-xs font-medium text-ink-700">Комментарий</label>
                 <textarea
+                  name="comment"
                   rows={3}
                   className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
                   placeholder="Любые пожелания"
@@ -208,7 +305,7 @@ export default function HomePage() {
               </Button>
               {formSent ? (
                 <div className="rounded-2xl bg-blush-50 px-4 py-3 text-center text-xs text-blush-700">
-                  Заявка отправлена (демо)
+                  Запись принята, мы свяжемся с вами
                 </div>
               ) : null}
             </form>

@@ -3,14 +3,21 @@ import { Button } from "@/components/Button";
 import { Container } from "@/components/Container";
 import { Section } from "@/components/Section";
 import { ServiceCard } from "@/components/ServiceCard";
-import { services } from "@/data/services";
+import { publicFetch } from "@/lib/api";
+import type { Service } from "@/lib/types";
 
 export const metadata: Metadata = {
   title: "Услуги — Salon Massaj",
   description: "Каталог массажных программ и спа-ритуалов Salon Massaj."
 };
 
-export default function ServicesPage() {
+export default async function ServicesPage() {
+  let services: Service[] = [];
+  try {
+    services = await publicFetch<Service[]>("/public/services");
+  } catch {
+    services = [];
+  }
   return (
     <Section className="pt-12">
       <Container>

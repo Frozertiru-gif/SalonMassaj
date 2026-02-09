@@ -6,16 +6,34 @@ import { redirect } from "next/navigation";
 
 const API_BASE_URL = process.env.API_INTERNAL_BASE_URL ?? process.env.API_URL ?? "http://localhost:8000";
 
-export async function loginAdmin(formData: FormData) {
+export type LoginAdminState = {
+  error?: string;
+};
+
+export async function loginAdmin(_: LoginAdminState, formData: FormData): Promise<LoginAdminState> {
   const email = formData.get("email");
   const password = formData.get("password");
-  const response = await fetch(`${API_BASE_URL}/admin/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password })
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/admin/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password })
+    });
+  } catch {
+    return { error: "Не удалось связаться с API. Попробуйте позже." };
+  }
   if (!response.ok) {
-    throw new Error("Invalid credentials");
+    let message = "Invalid credentials";
+    try {
+      const data = (await response.json()) as { detail?: string };
+      if (data?.detail) {
+        message = data.detail;
+      }
+    } catch {
+      message = "Unable to login. Please try again.";
+    }
+    return { error: message };
   }
   const data = (await response.json()) as { access_token: string };
   cookies().set("admin_token", data.access_token, {

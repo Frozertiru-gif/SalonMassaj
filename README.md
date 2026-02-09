@@ -26,20 +26,17 @@ curl http://localhost:8000/health
 ### Миграции Alembic
 
 ```bash
-cd api
-alembic upgrade head
+docker compose run --rm migrate
 ```
 
-### Seed администратора и базовых настроек
+### Seed администратора (dev)
 
 ```bash
-cd api
-python -m app.scripts.seed
+SEED_ADMIN=true ADMIN_EMAIL=owner@example.com ADMIN_PASSWORD=owner123 \
+  docker compose run --rm seed
 ```
 
-По умолчанию создаётся админ:
-- email: `owner@example.com`
-- пароль: `owner123`
+Seed не создаёт дубликаты: если админ с таким email уже есть, он не будет пересоздан.
 
 ## Локальный запуск без Docker
 
@@ -52,7 +49,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 alembic upgrade head
-python -m app.scripts.seed
+SEED_ADMIN=true ADMIN_EMAIL=owner@example.com ADMIN_PASSWORD=owner123 python -m app.scripts.seed_admin
 uvicorn app.main:app --reload
 ```
 
@@ -69,11 +66,14 @@ npm run dev
 
 ### `/api/.env` (локальный запуск)
 
-Смотрите `.env.example`:
+Смотрите `.env.example`, дополнительно для dev:
 - `DATABASE_URL`
 - `JWT_SECRET`
 - `JWT_EXPIRES_MINUTES`
 - `TELEGRAM_BOT_TOKEN`
+- `ADMIN_EMAIL`
+- `ADMIN_PASSWORD`
+- `SEED_ADMIN`
 
 ### `/web/.env.local` (локальный запуск)
 
@@ -85,10 +85,18 @@ npm run dev
 Минимум:
 - `TELEGRAM_BOT_TOKEN`
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
+- `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `SEED_ADMIN` (dev seed администратора)
 
 ## Админка
 
 URL: http://localhost:3000/admin/login
+
+Dev-вход:
+- email: значение `ADMIN_EMAIL`
+- пароль: значение `ADMIN_PASSWORD`
+
+Чтобы сменить пароль, задайте новое значение `ADMIN_PASSWORD`, удалите запись администратора из таблицы `admins`
+или обновите её вручную, затем повторно запустите seed-скрипт.
 
 Возможности:
 - управление услугами и категориями

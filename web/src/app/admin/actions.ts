@@ -4,7 +4,39 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-const API_BASE_URL = process.env.API_INTERNAL_BASE_URL ?? process.env.API_URL ?? "http://localhost:8000";
+export const API_BASE_URL =
+  process.env.API_INTERNAL_BASE_URL ?? process.env.API_URL ?? "http://localhost:8000";
+const UNAUTHORIZED_STATUSES = new Set([401, 403]);
+const SESSION_EXPIRED_MESSAGE = "Сессия истекла. Войдите снова.";
+
+function redirectToAdminLogin() {
+  cookies().delete("admin_token");
+  redirect("/admin/login");
+}
+
+function getAdminTokenOrRedirect() {
+  const token = cookies().get("admin_token")?.value;
+  if (!token) {
+    redirect("/admin/login");
+  }
+  return token;
+}
+
+function handleUnauthorizedResponse(response: Response) {
+  if (UNAUTHORIZED_STATUSES.has(response.status)) {
+    redirectToAdminLogin();
+  }
+}
+
+function mapAdminErrorDetail(detail?: string) {
+  if (!detail) {
+    return detail;
+  }
+  if (detail === "Invalid token" || detail === "Inactive admin") {
+    return SESSION_EXPIRED_MESSAGE;
+  }
+  return detail;
+}
 
 export type LoginAdminState = {
   error?: string;
@@ -55,7 +87,7 @@ export async function logoutAdmin() {
 }
 
 export async function updateSetting(key: string, value_jsonb: object) {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const response = await fetch(`${API_BASE_URL}/admin/settings/${key}`, {
     method: "PUT",
     headers: {
@@ -64,6 +96,7 @@ export async function updateSetting(key: string, value_jsonb: object) {
     },
     body: JSON.stringify({ value_jsonb })
   });
+  handleUnauthorizedResponse(response);
   if (!response.ok) {
     throw new Error("Failed to update setting");
   }
@@ -71,7 +104,7 @@ export async function updateSetting(key: string, value_jsonb: object) {
 }
 
 export async function updateBookingStatus(id: number, status: string, is_read: boolean) {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const response = await fetch(`${API_BASE_URL}/admin/bookings/${id}`, {
     method: "PATCH",
     headers: {
@@ -80,6 +113,7 @@ export async function updateBookingStatus(id: number, status: string, is_read: b
     },
     body: JSON.stringify({ status, is_read })
   });
+  handleUnauthorizedResponse(response);
   if (!response.ok) {
     throw new Error("Failed to update booking");
   }
@@ -91,7 +125,7 @@ export async function createCategory(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const payload = {
     title: formData.get("title"),
     slug: formData.get("slug"),
@@ -106,9 +140,10 @@ export async function createCategory(
     },
     body: JSON.stringify(payload)
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось создать категорию" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось создать категорию" };
   }
   revalidatePath("/admin/categories");
   return { success: "Категория создана" };
@@ -118,7 +153,7 @@ export async function createService(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const payload = {
     category_id: Number(formData.get("category_id")),
     title: formData.get("title"),
@@ -144,9 +179,10 @@ export async function createService(
     },
     body: JSON.stringify(payload)
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось создать услугу" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось создать услугу" };
   }
   revalidatePath("/admin/services");
   return { success: "Услуга создана" };
@@ -156,7 +192,7 @@ export async function updateCategory(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const id = Number(formData.get("id"));
   const payload = {
     title: formData.get("title"),
@@ -172,9 +208,10 @@ export async function updateCategory(
     },
     body: JSON.stringify(payload)
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось обновить категорию" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось обновить категорию" };
   }
   revalidatePath("/admin/categories");
   return { success: "Категория обновлена" };
@@ -184,7 +221,7 @@ export async function deleteCategory(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const id = Number(formData.get("id"));
   const response = await fetch(`${API_BASE_URL}/admin/categories/${id}`, {
     method: "DELETE",
@@ -192,9 +229,10 @@ export async function deleteCategory(
       Authorization: `Bearer ${token}`
     }
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось удалить категорию" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось удалить категорию" };
   }
   revalidatePath("/admin/categories");
   return { success: "Категория удалена" };
@@ -204,7 +242,7 @@ export async function updateService(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const id = Number(formData.get("id"));
   const slugValue = formData.get("slug");
   const payload = {
@@ -232,9 +270,10 @@ export async function updateService(
     },
     body: JSON.stringify(payload)
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось обновить услугу" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось обновить услугу" };
   }
   revalidatePath("/admin/services");
   revalidatePath(`/admin/services/${id}`);
@@ -245,7 +284,7 @@ export async function deleteService(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const id = Number(formData.get("id"));
   const response = await fetch(`${API_BASE_URL}/admin/services/${id}`, {
     method: "DELETE",
@@ -253,9 +292,10 @@ export async function deleteService(
       Authorization: `Bearer ${token}`
     }
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось удалить услугу" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось удалить услугу" };
   }
   revalidatePath("/admin/services");
   return { success: "Услуга удалена" };
@@ -265,7 +305,7 @@ export async function createWeeklyRitual(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const payload = {
     title: formData.get("title"),
     slug: formData.get("slug") || null,
@@ -287,9 +327,10 @@ export async function createWeeklyRitual(
     },
     body: JSON.stringify(payload)
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось создать ритуал" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось создать ритуал" };
   }
   revalidatePath("/admin/weekly-rituals");
   return { success: "Ритуал создан" };
@@ -299,7 +340,7 @@ export async function updateWeeklyRitual(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const id = Number(formData.get("id"));
   const slugValue = formData.get("slug");
   const payload = {
@@ -323,9 +364,10 @@ export async function updateWeeklyRitual(
     },
     body: JSON.stringify(payload)
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось обновить ритуал" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось обновить ритуал" };
   }
   revalidatePath("/admin/weekly-rituals");
   revalidatePath(`/admin/weekly-rituals/${id}`);
@@ -336,7 +378,7 @@ export async function deleteWeeklyRitual(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const id = Number(formData.get("id"));
   const response = await fetch(`${API_BASE_URL}/admin/weekly-rituals/${id}`, {
     method: "DELETE",
@@ -344,9 +386,10 @@ export async function deleteWeeklyRitual(
       Authorization: `Bearer ${token}`
     }
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось удалить ритуал" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось удалить ритуал" };
   }
   revalidatePath("/admin/weekly-rituals");
   return { success: "Ритуал удалён" };
@@ -356,7 +399,7 @@ export async function createReview(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const payload = {
     author_name: formData.get("author_name"),
     rating: formData.get("rating") ? Number(formData.get("rating")) : null,
@@ -375,9 +418,10 @@ export async function createReview(
     },
     body: JSON.stringify(payload)
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось создать отзыв" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось создать отзыв" };
   }
   revalidatePath("/admin/reviews");
   return { success: "Отзыв создан" };
@@ -387,7 +431,7 @@ export async function updateReview(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const id = Number(formData.get("id"));
   const payload = {
     author_name: formData.get("author_name"),
@@ -407,9 +451,10 @@ export async function updateReview(
     },
     body: JSON.stringify(payload)
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось обновить отзыв" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось обновить отзыв" };
   }
   revalidatePath("/admin/reviews");
   revalidatePath(`/admin/reviews/${id}`);
@@ -420,7 +465,7 @@ export async function deleteReview(
   _prevState: AdminFormState,
   formData: FormData
 ): Promise<AdminFormState> {
-  const token = cookies().get("admin_token")?.value;
+  const token = getAdminTokenOrRedirect();
   const id = Number(formData.get("id"));
   const response = await fetch(`${API_BASE_URL}/admin/reviews/${id}`, {
     method: "DELETE",
@@ -428,9 +473,10 @@ export async function deleteReview(
       Authorization: `Bearer ${token}`
     }
   });
+  handleUnauthorizedResponse(response);
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    return { error: data?.detail || "Не удалось удалить отзыв" };
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось удалить отзыв" };
   }
   revalidatePath("/admin/reviews");
   return { success: "Отзыв удалён" };

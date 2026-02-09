@@ -1,0 +1,220 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Button } from "@/components/Button";
+import { Card } from "@/components/Card";
+import { Container } from "@/components/Container";
+import { Section } from "@/components/Section";
+import { ServiceCard } from "@/components/ServiceCard";
+import { ReviewCard } from "@/components/ReviewCard";
+import { services } from "@/data/services";
+import { reviews } from "@/data/reviews";
+
+const advantages = [
+  { title: "Персональные ритуалы", text: "Подбираем технику и масла под ваше состояние.", icon: "🌸" },
+  { title: "Премиальные материалы", text: "Органические масла и тёплые текстуры.", icon: "🕯️" },
+  { title: "Спокойная атмосфера", text: "Тишина, мягкий свет и ароматерапия.", icon: "✨" },
+  { title: "Внимание к деталям", text: "Комфорт с первого касания и до финального чая.", icon: "🤍" }
+];
+
+export default function HomePage() {
+  const searchParams = useSearchParams();
+  const initialService = searchParams.get("service") ?? "";
+  const [selectedService, setSelectedService] = useState(initialService);
+  const [formSent, setFormSent] = useState(false);
+
+  const servicesPreview = useMemo(() => services.slice(0, 8), []);
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setFormSent(true);
+    setTimeout(() => setFormSent(false), 4000);
+  };
+
+  return (
+    <div>
+      <Section className="pt-12">
+        <Container className="grid items-center gap-12 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-6">
+            <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Премиальный массажный салон</p>
+            <h1 className="text-4xl font-semibold leading-tight text-ink-900 sm:text-5xl">
+              Нежный уход для тела и разума в пастельной эстетике
+            </h1>
+            <p className="text-base text-ink-700">
+              Погрузитесь в атмосферу спокойствия и заботы: мягкие ритуалы, тёплые масла и индивидуальные программы для
+              восстановления энергии.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              <Button href="#booking">Записаться</Button>
+              <Button href="/services" variant="secondary">
+                Услуги
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-4 text-sm text-ink-700">
+              <span>⏳ 60–90 мин</span>
+              <span>🌿 Натуральные масла</span>
+              <span>☕ Чайная церемония после сеанса</span>
+            </div>
+          </div>
+          <div className="relative">
+            <div className="absolute -left-6 -top-6 h-full w-full rounded-3xl bg-gradient-to-br from-blush-100 via-blush-50 to-white" />
+            <div className="relative rounded-3xl bg-white/80 p-8 shadow-soft ring-1 ring-blush-100">
+              <div className="space-y-4">
+                <p className="text-sm uppercase tracking-[0.2em] text-blush-500">Ритуал недели</p>
+                <h2 className="text-2xl font-semibold text-ink-900">Арома-релакс массаж</h2>
+                <p className="text-sm text-ink-700">
+                  Тёплые масла, спокойный свет и плавные движения для глубокого расслабления.
+                </p>
+                <Button href="/services/aroma-relax" variant="ghost">
+                  Подробнее →
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Container>
+      </Section>
+
+      <Section>
+        <Container>
+          <div className="flex items-end justify-between gap-6">
+            <div>
+              <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Каталог услуг</p>
+              <h2 className="mt-3 text-3xl font-semibold text-ink-900">Выберите свой ритуал</h2>
+            </div>
+            <Button href="/services" variant="ghost" className="hidden sm:inline-flex">
+              Смотреть все →
+            </Button>
+          </div>
+          <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {servicesPreview.map((service) => (
+              <ServiceCard key={service.slug} service={service} />
+            ))}
+          </div>
+        </Container>
+      </Section>
+
+      <Section className="bg-gradient-to-br from-blush-50 via-white to-blush-100">
+        <Container>
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {advantages.map((item) => (
+              <Card key={item.title}>
+                <div className="text-2xl">{item.icon}</div>
+                <h3 className="mt-4 text-lg font-semibold text-ink-900">{item.title}</h3>
+                <p className="mt-2 text-sm text-ink-700">{item.text}</p>
+              </Card>
+            ))}
+          </div>
+        </Container>
+      </Section>
+
+      <Section id="about">
+        <Container className="grid items-center gap-10 lg:grid-cols-[1fr_1fr]">
+          <div className="space-y-4">
+            <p className="text-sm uppercase tracking-[0.3em] text-blush-600">О нас</p>
+            <h2 className="text-3xl font-semibold text-ink-900">Пространство, где забота ощущается в каждой детали</h2>
+            <p className="text-base text-ink-700">
+              Мы создали салон, в котором можно выдохнуть и довериться профессионалам. Наши мастера работают бережно,
+              подбирают техники и уделяют внимание вашему состоянию.
+            </p>
+            <p className="text-base text-ink-700">
+              В интерьере — мягкий текстиль, пастельные оттенки и тихая музыка. В конце сеанса мы предлагаем тёплый чай,
+              чтобы зафиксировать ощущение спокойствия.
+            </p>
+          </div>
+          <div className="relative">
+            <div className="absolute -left-6 -top-6 h-full w-full rounded-3xl bg-gradient-to-br from-blush-200 via-blush-100 to-white" />
+            <div className="relative h-80 rounded-3xl bg-white/80 shadow-soft ring-1 ring-blush-100">
+              <div className="flex h-full items-center justify-center text-sm text-blush-500">
+                Фото салона (плейсхолдер)
+              </div>
+            </div>
+          </div>
+        </Container>
+      </Section>
+
+      <Section id="reviews" className="bg-white/70">
+        <Container>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Отзывы</p>
+            <h2 className="text-3xl font-semibold text-ink-900">Гости рассказывают о своих ощущениях</h2>
+          </div>
+          <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {reviews.map((review) => (
+              <ReviewCard key={review.name} review={review} />
+            ))}
+          </div>
+        </Container>
+      </Section>
+
+      <Section id="booking">
+        <Container className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+          <div>
+            <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Запись</p>
+            <h2 className="mt-3 text-3xl font-semibold text-ink-900">Запланируйте визит</h2>
+            <p className="mt-4 text-base text-ink-700">
+              Оставьте заявку, и мы свяжемся с вами, чтобы подобрать удобное время. Ответим в течение 15 минут в рабочее
+              время.
+            </p>
+            <div className="mt-6 space-y-3 text-sm text-ink-700">
+              <p>📞 +7 (999) 123-45-67</p>
+              <p>📍 Москва, ул. Пудровая, 12</p>
+              <p>🕒 Ежедневно 10:00–21:00</p>
+            </div>
+          </div>
+          <Card>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-ink-700">Имя</label>
+                <input
+                  required
+                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
+                  placeholder="Ваше имя"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-ink-700">Телефон</label>
+                <input
+                  required
+                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
+                  placeholder="+7 (___) ___-__-__"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-ink-700">Услуга</label>
+                <select
+                  value={selectedService}
+                  onChange={(event) => setSelectedService(event.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
+                >
+                  <option value="">Выберите услугу</option>
+                  {services.map((service) => (
+                    <option key={service.slug} value={service.title}>
+                      {service.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-ink-700">Комментарий</label>
+                <textarea
+                  rows={3}
+                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
+                  placeholder="Любые пожелания"
+                />
+              </div>
+              <Button type="submit" className="w-full">
+                Отправить заявку
+              </Button>
+              {formSent ? (
+                <div className="rounded-2xl bg-blush-50 px-4 py-3 text-center text-xs text-blush-700">
+                  Заявка отправлена (демо)
+                </div>
+              ) : null}
+            </form>
+          </Card>
+        </Container>
+      </Section>
+    </div>
+  );
+}

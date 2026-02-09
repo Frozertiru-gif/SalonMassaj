@@ -1,11 +1,8 @@
 import asyncio
 from datetime import datetime, timezone
 
-from sqlalchemy import select
-
-from app.core.security import hash_password
 from app.db import AsyncSessionLocal
-from app.models import Admin, AdminRole, Setting
+from app.models import Setting
 
 
 DEFAULT_SETTINGS = {
@@ -31,17 +28,6 @@ DEFAULT_SETTINGS = {
 
 async def seed() -> None:
     async with AsyncSessionLocal() as session:
-        admin_result = await session.execute(select(Admin).where(Admin.email == "owner@example.com"))
-        if not admin_result.scalar_one_or_none():
-            session.add(
-                Admin(
-                    email="owner@example.com",
-                    password_hash=hash_password("owner123"),
-                    role=AdminRole.owner,
-                    is_active=True,
-                )
-            )
-
         for key, value in DEFAULT_SETTINGS.items():
             existing = await session.get(Setting, key)
             if existing:

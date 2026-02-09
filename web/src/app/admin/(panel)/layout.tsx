@@ -3,12 +3,30 @@ import { redirect } from "next/navigation";
 import { ReactNode } from "react";
 import { Button } from "@/components/Button";
 import { Container } from "@/components/Container";
-import { logoutAdmin } from "../actions";
+import { API_BASE_URL, logoutAdmin } from "../actions";
 
-export default function AdminLayout({ children }: { children: ReactNode }) {
+export default async function AdminLayout({ children }: { children: ReactNode }) {
   const token = cookies().get("admin_token")?.value;
   if (!token) {
     redirect("/admin/login");
+  }
+  let authWarning: string | null = null;
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/auth/me`, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      cache: "no-store"
+    });
+    if (response.status === 401 || response.status === 403) {
+      cookies().delete("admin_token");
+      redirect("/admin/login");
+    }
+    if (!response.ok) {
+      authWarning = "Не удалось проверить сессию. Данные могут быть устаревшими.";
+    }
+  } catch {
+    authWarning = "Не удалось проверить сессию. Данные могут быть устаревшими.";
   }
 
   return (
@@ -18,6 +36,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <div>
             <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Админка</p>
             <h1 className="text-xl font-semibold text-ink-900">Salon Massaj</h1>
+            {authWarning ? <p className="text-xs text-amber-600">{authWarning}</p> : null}
           </div>
           <nav className="flex flex-wrap gap-3 text-sm">
             <Button href="/admin" variant="ghost">

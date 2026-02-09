@@ -19,11 +19,13 @@ services:
   api:
     build:
       context: ./api
+    working_dir: /app
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/salon
       JWT_SECRET: dev-secret
       JWT_EXPIRES_MINUTES: 60
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      PYTHONPATH: /app
     depends_on:
       db:
         condition: service_healthy
@@ -44,8 +46,10 @@ services:
   migrate:
     build:
       context: ./api
+    working_dir: /app
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/salon
+      PYTHONPATH: /app
     depends_on:
       db:
         condition: service_healthy
@@ -56,11 +60,13 @@ services:
   seed:
     build:
       context: ./api
+    working_dir: /app
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/salon
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       SEED_ADMIN: ${SEED_ADMIN:-false}
+      PYTHONPATH: /app
     depends_on:
       db:
         condition: service_healthy

@@ -9,6 +9,18 @@ from app.core.config import settings
 from app.db import AsyncSessionLocal
 from app.services.telegram import TelegramError, get_updates
 
+
+def _configure_logging() -> None:
+    level_name = (settings.log_level or "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+
+
+_configure_logging()
+
 logger = logging.getLogger(__name__)
 app = FastAPI(title="SalonMassaj API")
 
@@ -53,10 +65,12 @@ async def _telegram_polling_loop() -> None:
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    mode = (settings.telegram_mode or "webhook").strip().lower()
+    logger.info("Telegram startup config: mode=%s token_set=%s webhook_secret_set=%s", mode, bool(settings.telegram_bot_token), bool(settings.telegram_webhook_secret))
+
     if not settings.telegram_bot_token:
         logger.error("TELEGRAM_BOT_TOKEN is not configured; Telegram handlers are disabled")
 
-    mode = (settings.telegram_mode or "webhook").strip().lower()
     if mode == "polling":
         app.state.telegram_polling_task = asyncio.create_task(_telegram_polling_loop())
         logger.warning("Telegram mode polling is enabled; webhook endpoints are not used")

@@ -243,6 +243,7 @@ class BookingOut(BookingBase):
     source: str
     is_read: bool
     admin_comment: str | None = None
+    final_price_cents: int | None = Field(default=None, ge=0)
     created_at: datetime
     service: ServiceOut | None = None
     master: MasterOut | None = None
@@ -253,6 +254,7 @@ class BookingUpdate(BaseModel):
     is_read: bool | None = None
     master_id: int | None = None
     admin_comment: str | None = None
+    final_price_cents: int | None = Field(default=None, ge=0)
 
 
 class BookingAdminCreate(BaseModel):

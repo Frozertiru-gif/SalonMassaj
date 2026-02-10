@@ -105,7 +105,8 @@ export async function updateBookingStatus(id: number, status: string, is_read: b
   });
   handleUnauthorizedResponse(response);
   if (!response.ok) {
-    throw new Error("Failed to update booking");
+    const data = await response.json().catch(() => null);
+    throw new Error(mapAdminErrorDetail(data?.detail) || "Failed to update booking");
   }
   revalidatePath("/admin/bookings");
   revalidatePath("/admin");
@@ -472,7 +473,7 @@ export async function deleteReview(
 }
 
 
-export async function updateBookingAdmin(payload: { id: number; status?: string; is_read?: boolean; master_id?: number | null; admin_comment?: string | null }) {
+export async function updateBookingAdmin(payload: { id: number; status?: string; is_read?: boolean; master_id?: number | null; admin_comment?: string | null; final_price_cents?: number | null }) {
   const token = getAdminTokenOrRedirect();
   const response = await fetch(`${API_BASE_URL}/admin/bookings/${payload.id}`, {
     method: "PATCH",
@@ -484,7 +485,8 @@ export async function updateBookingAdmin(payload: { id: number; status?: string;
   });
   handleUnauthorizedResponse(response);
   if (!response.ok) {
-    throw new Error("Failed to update booking");
+    const data = await response.json().catch(() => null);
+    throw new Error(mapAdminErrorDetail(data?.detail) || "Failed to update booking");
   }
   revalidatePath("/admin/bookings");
   revalidatePath("/admin");

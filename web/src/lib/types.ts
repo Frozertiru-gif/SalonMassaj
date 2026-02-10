@@ -83,6 +83,7 @@ export type Booking = {
   source: string;
   is_read: boolean;
   admin_comment?: string | null;
+  final_price_cents?: number | null;
   created_at: string;
   service?: Service;
   master?: Master | null;

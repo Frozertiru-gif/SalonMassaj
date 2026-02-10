@@ -10,6 +10,7 @@ type ButtonProps = {
   variant?: ButtonVariant;
   className?: string;
   type?: "button" | "submit" | "reset";
+  disabled?: boolean;
 };
 
 const variantClasses: Record<ButtonVariant, string> = {
@@ -25,7 +26,8 @@ export function Button({
   onClick,
   variant = "primary",
   className,
-  type = "button"
+  type = "button",
+  disabled = false
 }: ButtonProps) {
   const classes = `inline-flex items-center justify-center rounded-full px-6 py-3 text-sm font-medium transition ${variantClasses[variant]} ${
     className ?? ""
@@ -40,7 +42,7 @@ export function Button({
   }
 
   return (
-    <button type={type} onClick={onClick} className={classes}>
+    <button type={type} onClick={onClick} className={classes} disabled={disabled}>
       {children}
     </button>
   );

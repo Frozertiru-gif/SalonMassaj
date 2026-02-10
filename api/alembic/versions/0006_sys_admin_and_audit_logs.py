@@ -17,7 +17,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TYPE adminrole ADD VALUE IF NOT EXISTS 'SYS_ADMIN'")
+    with op.get_context().autocommit_block():
+        op.execute("ALTER TYPE adminrole ADD VALUE IF NOT EXISTS 'SYS_ADMIN'")
+
     op.execute("UPDATE admins SET role = 'SYS_ADMIN' WHERE role = 'OWNER'")
 
     op.create_table(

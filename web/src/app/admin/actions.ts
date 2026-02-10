@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { adminFetchResponse } from "@/lib/api";
-import { ADMIN_TOKEN_COOKIE, buildAdminLoginUrl, clearAdminAuthCookie, normalizeAdminNextPath } from "@/lib/auth";
+import { ADMIN_TOKEN_COOKIE, buildAdminLoginUrl, normalizeAdminNextPath } from "@/lib/auth";
 import { API_BASE_URL } from "./adminApi";
 import type { AdminFormState, LoginAdminState } from "./types";
 
@@ -59,7 +59,7 @@ export async function loginAdmin(_: LoginAdminState, formData: FormData): Promis
 }
 
 export async function logoutAdmin() {
-  clearAdminAuthCookie();
+  await fetch("/api/admin/logout", { method: "POST", cache: "no-store" }).catch(() => undefined);
   redirect(buildAdminLoginUrl());
 }
 

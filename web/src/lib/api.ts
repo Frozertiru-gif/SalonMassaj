@@ -1,9 +1,5 @@
 import { cookies } from "next/headers";
-import {
-  ADMIN_TOKEN_COOKIE,
-  isAuthDetail,
-  redirectToAdminLogin
-} from "@/lib/auth";
+import { ADMIN_TOKEN_COOKIE, isAuthDetail, redirectToAdminLogin } from "@/lib/auth";
 
 type PublicFetchInit = RequestInit & {
   revalidate?: number;

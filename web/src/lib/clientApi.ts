@@ -9,13 +9,18 @@ function getAuthErrorDetail(data: unknown): string | null {
   return typeof detail === "string" ? detail : null;
 }
 
+async function clientAdminLogout(): Promise<void> {
+  await fetch("/api/admin/logout", { method: "POST" }).catch(() => undefined);
+}
+
 export function clientAdminRedirect(nextPath?: string) {
-  window.location.replace(buildAdminLoginUrl(nextPath ?? `${window.location.pathname}${window.location.search}`));
+  window.location.assign(buildAdminLoginUrl(nextPath ?? `${window.location.pathname}${window.location.search}`));
 }
 
 export async function clientAdminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const response = await fetch(input, init);
   if (response.status === 401 || response.status === 403) {
+    await clientAdminLogout();
     clientAdminRedirect();
     return response;
   }
@@ -24,6 +29,7 @@ export async function clientAdminFetch(input: RequestInfo | URL, init?: RequestI
     const data = await response.json().catch(() => null);
     const detail = getAuthErrorDetail(data);
     if (isAuthDetail(detail)) {
+      await clientAdminLogout();
       clientAdminRedirect();
     }
   }

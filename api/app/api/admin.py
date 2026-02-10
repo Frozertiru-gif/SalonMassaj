@@ -2,20 +2,22 @@ import re
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_admin
+from app.api.deps import require_admin, require_sys_admin
 from app.core.config import settings
 from app.db import get_db
-from app.models import Booking, BookingStatus, Master, Notification, Review, Service, ServiceCategory, Setting, WeeklyRitual
+from app.models import Admin, AuditActorType, AuditLog, Booking, BookingStatus, Master, Notification, Review, Service, ServiceCategory, Setting, WeeklyRitual
 from app.services.bookings import resolve_available_slot
+from app.services.audit import log_event
 from app.services.telegram import get_tg_notifications_settings, normalize_tg_notifications, send_message
 from app.utils import get_availability_slots
 from app.schemas import (
+    AuditLogOut,
     BookingAdminCreate,
     BookingOut,
     BookingSlotOut,
@@ -44,7 +46,7 @@ from app.schemas import (
     WeeklyRitualUpdate,
 )
 
-router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
 CYRILLIC_TRANSLIT = {
@@ -108,6 +110,12 @@ def pick_unique_slug(base_slug: str, existing_slugs: set[str]) -> str:
     return base_slug
 
 
+def _request_context(request: Request | None) -> tuple[str | None, str | None]:
+    if request is None:
+        return None, None
+    return request.client.host if request.client else None, request.headers.get("user-agent")
+
+
 @router.get("/services", response_model=list[ServiceOut])
 async def list_services(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Service).options(selectinload(Service.category)).order_by(Service.sort_order, Service.title))
@@ -115,7 +123,7 @@ async def list_services(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/services", response_model=ServiceOut)
-async def create_service(payload: ServiceCreate, db: AsyncSession = Depends(get_db)):
+async def create_service(payload: ServiceCreate, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
     payload_data = payload.model_dump()
     raw_slug = payload.slug
     base_slug = normalize_slug((raw_slug or payload.title) or "")
@@ -140,11 +148,13 @@ async def create_service(payload: ServiceCreate, db: AsyncSession = Depends(get_
         service_out = ServiceOut.model_validate(result.scalar_one())
     except IntegrityError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists") from exc
+    ip, user_agent = _request_context(request)
+    await log_event(db, actor_type=AuditActorType.web, actor_admin=admin, action="service.create", entity_type="service", entity_id=service_out.id, meta={"title": service_out.title}, ip=ip, user_agent=user_agent)
     return service_out
 
 
 @router.put("/services/{service_id}", response_model=ServiceOut)
-async def update_service(service_id: int, payload: ServiceUpdate, db: AsyncSession = Depends(get_db)):
+async def update_service(service_id: int, payload: ServiceUpdate, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
     result = await db.execute(select(Service).where(Service.id == service_id))
     service = result.scalar_one_or_none()
     if not service:
@@ -165,16 +175,20 @@ async def update_service(service_id: int, payload: ServiceUpdate, db: AsyncSessi
     except IntegrityError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists") from exc
     await db.refresh(service)
+    ip, user_agent = _request_context(request)
+    await log_event(db, actor_type=AuditActorType.web, actor_admin=admin, action="service.update", entity_type="service", entity_id=service.id, meta={"fields": list(updates.keys())}, ip=ip, user_agent=user_agent)
     return service
 
 
 @router.delete("/services/{service_id}")
-async def delete_service(service_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_service(service_id: int, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
     result = await db.execute(select(Service).where(Service.id == service_id))
     service = result.scalar_one_or_none()
     if not service:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     await db.delete(service)
+    ip, user_agent = _request_context(request)
+    await log_event(db, actor_type=AuditActorType.web, actor_admin=admin, action="service.delete", entity_type="service", entity_id=service_id, ip=ip, user_agent=user_agent)
     return {"status": "deleted"}
 
 
@@ -439,7 +453,7 @@ async def get_setting(key: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/settings/{key}", response_model=SettingOut)
-async def update_setting(key: str, payload: SettingUpdate, db: AsyncSession = Depends(get_db)):
+async def update_setting(key: str, payload: SettingUpdate, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
     if key not in {"business_hours", "slot_step_min", "booking_rules", "contacts", "tg_notifications"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid setting key")
     if not isinstance(payload.value_jsonb, dict):
@@ -458,6 +472,8 @@ async def update_setting(key: str, payload: SettingUpdate, db: AsyncSession = De
         db.add(setting)
     await db.flush()
     await db.refresh(setting)
+    ip, user_agent = _request_context(request)
+    await log_event(db, actor_type=AuditActorType.web, actor_admin=admin, action="settings.update", entity_type="settings", entity_id=key, meta={"keys": list(payload.value_jsonb.keys())[:10]}, ip=ip, user_agent=user_agent)
     return setting
 
 
@@ -537,7 +553,7 @@ async def list_booking_slots(service_id: int, date: str, master_id: int | None =
 
 
 @router.post("/bookings", response_model=BookingOut)
-async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends(get_db)):
+async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
     requested_start = datetime.combine(payload.date, payload.time, tzinfo=timezone.utc)
     chosen = await resolve_available_slot(db, payload.service_id, requested_start, datetime.now(timezone.utc), master_id=payload.master_id)
 
@@ -572,11 +588,14 @@ async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends
         .where(Booking.id == booking.id)
         .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category), selectinload(Booking.master).selectinload(Master.services))
     )
-    return result.scalar_one()
+    booking_out = result.scalar_one()
+    ip, user_agent = _request_context(request)
+    await log_event(db, actor_type=AuditActorType.web, actor_admin=admin, action="booking.create", entity_type="booking", entity_id=booking_out.id, meta={"status": booking_out.status.value}, ip=ip, user_agent=user_agent)
+    return booking_out
 
 
 @router.patch("/bookings/{booking_id}", response_model=BookingOut)
-async def update_booking(booking_id: int, payload: BookingUpdate, db: AsyncSession = Depends(get_db)):
+async def update_booking(booking_id: int, payload: BookingUpdate, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
     result = await db.execute(
         select(Booking)
         .where(Booking.id == booking_id)
@@ -613,7 +632,33 @@ async def update_booking(booking_id: int, payload: BookingUpdate, db: AsyncSessi
         .where(Booking.id == booking_id)
         .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category), selectinload(Booking.master).selectinload(Master.services))
     )
-    return result.scalar_one()
+    updated_booking = result.scalar_one()
+    ip, user_agent = _request_context(request)
+    await log_event(db, actor_type=AuditActorType.web, actor_admin=admin, action="booking.update", entity_type="booking", entity_id=updated_booking.id, meta={"fields": list(updates.keys())}, ip=ip, user_agent=user_agent)
+    return updated_booking
+
+
+
+
+@router.get("/logs", response_model=list[AuditLogOut])
+async def list_audit_logs(
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    action: str | None = None,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    _: Admin = Depends(require_sys_admin),
+):
+    query = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
+    if action:
+        query = query.where(AuditLog.action == action)
+    if entity_type:
+        query = query.where(AuditLog.entity_type == entity_type)
+    if entity_id:
+        query = query.where(AuditLog.entity_id == entity_id)
+    result = await db.execute(query)
+    return result.scalars().all()
 
 
 @router.get("/notifications", response_model=list[NotificationOut])

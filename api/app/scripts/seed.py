@@ -22,6 +22,8 @@ DEFAULT_SETTINGS = {
         "address": "Москва, ул. Пудровая, 12",
         "socials": ["https://t.me/salonmassaj"],
     },
+    "tg_admin_ids": [],
+    "tg_sys_admin_ids": [],
     "tg_notifications": {
         "enabled": False,
         "admin_chat_id": None,

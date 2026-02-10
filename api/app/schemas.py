@@ -23,6 +23,23 @@ class AdminOut(BaseModel):
     is_active: bool
 
 
+
+
+class AuditLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    actor_type: str
+    actor_user_id: int | None = None
+    actor_tg_user_id: int | None = None
+    actor_role: str | None = None
+    action: str
+    entity_type: str
+    entity_id: str | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+    ip: str | None = None
+    user_agent: str | None = None
 class ServiceCategoryBase(BaseModel):
     title: str
     slug: str

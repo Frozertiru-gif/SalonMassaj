@@ -27,6 +27,13 @@ class TelegramError(RuntimeError):
     pass
 
 
+def _short_response_text(value: str, limit: int = 500) -> str:
+    normalized = value.replace("\n", " ").strip()
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit]}…"
+
+
 def normalize_tg_notifications(raw: dict[str, Any] | None) -> TgNotificationsSettings:
     data = dict(raw or {})
     if "admin_chat_id" not in data and "chat_id" in data:
@@ -86,15 +93,43 @@ async def _telegram_api(method: str, payload: dict[str, Any]) -> dict[str, Any]:
             timeout=10,
         )
 
+    short_text = _short_response_text(response.text)
+    if response.is_success:
+        logger.info("Telegram API request success: method=%s status=%s body=%s", method, response.status_code, short_text)
+
     if not response.is_success:
-        logger.error("Telegram API request failed: method=%s status=%s body=%s", method, response.status_code, response.text)
+        logger.error("Telegram API request failed: method=%s status=%s body=%s", method, response.status_code, short_text)
         raise TelegramError(f"Telegram API request failed with status {response.status_code}")
 
     data = response.json()
     if not data.get("ok"):
-        logger.error("Telegram API error response: method=%s status=%s body=%s", method, response.status_code, response.text)
+        logger.error("Telegram API error response: method=%s status=%s body=%s", method, response.status_code, short_text)
         raise TelegramError(data.get("description") or "Telegram API returned non-ok response")
     return data
+
+
+async def get_webhook_info() -> dict[str, Any]:
+    return await _telegram_api("getWebhookInfo", {})
+
+
+async def set_webhook(url: str, secret_token: str, allowed_updates: list[str] | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"url": url, "secret_token": secret_token, "drop_pending_updates": False}
+    if allowed_updates is not None:
+        payload["allowed_updates"] = allowed_updates
+    return await _telegram_api("setWebhook", payload)
+
+
+async def delete_webhook(drop_pending_updates: bool = False) -> dict[str, Any]:
+    return await _telegram_api("deleteWebhook", {"drop_pending_updates": drop_pending_updates})
+
+
+async def get_updates(offset: int | None = None, timeout: int = 30, allowed_updates: list[str] | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"timeout": timeout}
+    if offset is not None:
+        payload["offset"] = offset
+    if allowed_updates is not None:
+        payload["allowed_updates"] = allowed_updates
+    return await _telegram_api("getUpdates", payload)
 
 
 async def send_message(

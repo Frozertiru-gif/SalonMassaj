@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     telegram_bot_username: str | None = None
     telegram_admin_ids: str | None = None
     telegram_sys_admin_ids: str | None = None
+    telegram_mode: str = "webhook"
 
 
 settings = Settings()

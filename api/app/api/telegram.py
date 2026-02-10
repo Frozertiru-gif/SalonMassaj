@@ -28,6 +28,39 @@ router = APIRouter(tags=["telegram"])
 logger = logging.getLogger(__name__)
 
 
+def _extract_from_id(update: dict[str, Any]) -> int | None:
+    message = update.get("message") or {}
+    if isinstance(message.get("from"), dict) and message["from"].get("id"):
+        return int(message["from"]["id"])
+
+    callback_query = update.get("callback_query") or {}
+    if isinstance(callback_query.get("from"), dict) and callback_query["from"].get("id"):
+        return int(callback_query["from"]["id"])
+
+    return None
+
+
+def _update_kind(update: dict[str, Any]) -> str:
+    if "message" in update:
+        return "message"
+    if "callback_query" in update:
+        return "callback_query"
+    return "other"
+
+
+def log_update_received(update: dict[str, Any]) -> None:
+    logger.info(
+        "TG update received",
+        extra={
+            "update_id": update.get("update_id"),
+            "update_type": _update_kind(update),
+            "from_id": _extract_from_id(update),
+            "has_message": "message" in update,
+            "has_callback": "callback_query" in update,
+        },
+    )
+
+
 async def _is_valid_secret(request: Request, tg_secret: str | None) -> bool:
     if not tg_secret:
         return False
@@ -56,19 +89,29 @@ def _admin_update_text(booking: Booking, action_text: str, actor_name: str | Non
 def _master_picker_keyboard(booking_id: int, masters: list[Master]) -> dict[str, Any]:
     rows: list[list[dict[str, str]]] = []
     for master in masters:
-        rows.append([
-            {
-                "text": master.name,
-                "callback_data": callback_data("set", booking_id, master.id),
-            }
-        ])
+        rows.append(
+            [
+                {
+                    "text": master.name,
+                    "callback_data": callback_data("set", booking_id, master.id),
+                }
+            ]
+        )
     return {"inline_keyboard": rows or [[{"text": "Нет активных мастеров", "callback_data": callback_data("pick", booking_id)}]]}
+
+
+@router.get("/telegram/health")
+async def telegram_health() -> dict[str, bool]:
+    return {"ok": True}
 
 
 @router.post("/telegram/webhook")
 async def telegram_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     tg_settings = await get_tg_notifications_settings(db)
     required_secret = settings.telegram_webhook_secret or tg_settings.webhook_secret
+    if not required_secret:
+        logger.error("Telegram webhook secret is not configured")
+        return {"ok": False, "detail": "webhook secret is not configured"}
     if not await _is_valid_secret(request, required_secret):
         return {"ok": False, "detail": "invalid secret"}
 
@@ -77,15 +120,19 @@ async def telegram_webhook(request: Request, db: AsyncSession = Depends(get_db))
     except Exception:  # noqa: BLE001
         return {"ok": True}
 
+    await process_update(update, db)
+    return {"ok": True}
+
+
+async def process_update(update: dict[str, Any], db: AsyncSession) -> None:
+    log_update_received(update)
     try:
         if "message" in update:
             await _handle_message(update["message"], db)
         elif "callback_query" in update:
             await _handle_callback(update["callback_query"], db)
     except Exception:  # noqa: BLE001
-        logger.exception("Failed to process Telegram webhook update")
-
-    return {"ok": True}
+        logger.exception("Failed to process Telegram update")
 
 
 async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
@@ -110,23 +157,26 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
     if not text.startswith("/start"):
         return
 
+    payload = ""
     parts = text.split(maxsplit=1)
-    if len(parts) != 2:
-        return
-    link_code = parts[1].strip()
+    if len(parts) == 2:
+        payload = parts[1].strip()
 
-    result = await db.execute(select(Master).where(Master.telegram_link_code == link_code))
-    master = result.scalar_one_or_none()
-    if not master:
-        await send_message(chat_id=telegram_user_id, text="Код привязки не найден или устарел.")
-        return
+    logger.info("/start received", extra={"from_id": int(telegram_user_id), "payload": payload or None})
 
-    master.telegram_user_id = int(telegram_user_id)
-    master.telegram_linked_at = datetime.now(timezone.utc)
-    master.telegram_link_code = None
-    await db.flush()
+    if payload:
+        result = await db.execute(select(Master).where(Master.telegram_link_code == payload))
+        master = result.scalar_one_or_none()
+        if master:
+            master.telegram_user_id = int(telegram_user_id)
+            master.telegram_linked_at = datetime.now(timezone.utc)
+            master.telegram_link_code = None
+            await db.flush()
+            await send_message(chat_id=telegram_user_id, text=f"Telegram успешно привязан к мастеру {master.name}.")
+        else:
+            await send_message(chat_id=telegram_user_id, text="Код привязки не найден или устарел.")
 
-    await send_message(chat_id=telegram_user_id, text=f"Telegram успешно привязан к мастеру {master.name}.")
+    await send_message(chat_id=telegram_user_id, text="OK, бот жив")
 
 
 async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> None:

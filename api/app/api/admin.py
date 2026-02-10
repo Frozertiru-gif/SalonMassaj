@@ -14,7 +14,14 @@ from app.db import get_db
 from app.models import Admin, AuditActorType, AuditLog, Booking, BookingStatus, Master, Notification, Review, Service, ServiceCategory, Setting, WeeklyRitual
 from app.services.bookings import resolve_available_slot
 from app.services.audit import log_event
-from app.services.telegram import get_tg_notifications_settings, normalize_tg_notifications, send_message
+from app.services.telegram import (
+    delete_webhook,
+    get_tg_notifications_settings,
+    get_webhook_info,
+    normalize_tg_notifications,
+    send_message,
+    set_webhook,
+)
 from app.utils import get_availability_slots
 from app.schemas import (
     AuditLogOut,
@@ -495,6 +502,51 @@ async def send_telegram_test_message(payload: TelegramTestMessageIn, db: AsyncSe
     )
     return TelegramTestMessageOut(ok=True, detail="Test message sent")
 
+
+
+
+@router.get("/telegram/webhook-info")
+async def telegram_webhook_info():
+    if not settings.telegram_bot_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="TELEGRAM_BOT_TOKEN is not configured")
+
+    info = await get_webhook_info()
+    result = info.get("result") if isinstance(info, dict) else None
+    current_url = result.get("url") if isinstance(result, dict) else None
+    return {
+        "telegram": info,
+        "diagnostics": {
+            "telegram_mode": settings.telegram_mode,
+            "token_configured": bool(settings.telegram_bot_token),
+            "webhook_secret_configured": bool(settings.telegram_webhook_secret),
+            "has_webhook_url": bool(current_url),
+            "current_webhook_url": current_url,
+            "last_error_message": result.get("last_error_message") if isinstance(result, dict) else None,
+        },
+    }
+
+
+@router.post("/telegram/set-webhook")
+async def telegram_set_webhook(base_url: str = Query(..., min_length=8)):
+    if not settings.telegram_bot_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="TELEGRAM_BOT_TOKEN is not configured")
+    if not settings.telegram_webhook_secret:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="TELEGRAM_WEBHOOK_SECRET is not configured")
+
+    normalized = base_url.strip().rstrip("/")
+    webhook_url = f"{normalized}/telegram/webhook"
+    return await set_webhook(
+        url=webhook_url,
+        secret_token=settings.telegram_webhook_secret,
+        allowed_updates=["message", "callback_query"],
+    )
+
+
+@router.post("/telegram/delete-webhook")
+async def telegram_delete_webhook(drop_pending_updates: bool = Query(default=False)):
+    if not settings.telegram_bot_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="TELEGRAM_BOT_TOKEN is not configured")
+    return await delete_webhook(drop_pending_updates=drop_pending_updates)
 
 @router.get("/bookings", response_model=list[BookingOut])
 async def list_bookings(

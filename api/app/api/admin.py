@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_admin
 from app.db import get_db
 from app.models import Booking, BookingStatus, Notification, Review, Service, ServiceCategory, Setting, WeeklyRitual
+from app.services.bookings import resolve_available_slot
 from app.utils import get_availability_slots
 from app.schemas import (
     BookingAdminCreate,
@@ -391,10 +392,7 @@ async def list_booking_slots(service_id: int, date: str, db: AsyncSession = Depe
 @router.post("/bookings", response_model=BookingOut)
 async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends(get_db)):
     requested_start = datetime.combine(payload.date, payload.time, tzinfo=timezone.utc)
-    slots = await get_availability_slots(db, payload.service_id, payload.date, datetime.now(timezone.utc))
-    chosen = next((slot for slot in slots if slot[0] == requested_start), None)
-    if not chosen:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="slot is busy")
+    chosen = await resolve_available_slot(db, payload.service_id, requested_start, datetime.now(timezone.utc))
 
     try:
         booking_status = BookingStatus(payload.status)
@@ -413,9 +411,14 @@ async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends
         is_read=True,
     )
     db.add(booking)
-    await db.commit()
-    await db.refresh(booking)
-    return booking
+    await db.flush()
+
+    result = await db.execute(
+        select(Booking)
+        .where(Booking.id == booking.id)
+        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category))
+    )
+    return result.scalar_one()
 
 
 @router.patch("/bookings/{booking_id}", response_model=BookingOut)

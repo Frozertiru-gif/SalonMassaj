@@ -188,7 +188,9 @@ class BookingBase(BaseModel):
 
 
 class BookingCreate(BookingBase):
-    pass
+    starts_at: datetime | None = None
+    date: date | str | None = None
+    time: time | str | None = None
 
 
 class BookingOut(BookingBase):

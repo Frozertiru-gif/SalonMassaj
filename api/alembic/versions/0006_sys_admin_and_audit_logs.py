@@ -17,10 +17,32 @@ depends_on = None
 
 
 def upgrade() -> None:
-    with op.get_context().autocommit_block():
-        op.execute("ALTER TYPE adminrole ADD VALUE IF NOT EXISTS 'SYS_ADMIN'")
+    bind = op.get_bind()
 
-    op.execute("UPDATE admins SET role = 'SYS_ADMIN' WHERE role = 'OWNER'")
+    with op.get_context().autocommit_block():
+        sys_admin_exists = bind.execute(
+            sa.text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_type t
+                    JOIN pg_enum e ON e.enumtypid = t.oid
+                    WHERE t.typname = 'adminrole'
+                      AND e.enumlabel = 'SYS_ADMIN'
+                )
+                """
+            )
+        ).scalar()
+        if not sys_admin_exists:
+            op.execute("ALTER TYPE adminrole ADD VALUE 'SYS_ADMIN'")
+
+    admins_table_exists = bind.execute(
+        sa.text("SELECT to_regclass('public.admins') IS NOT NULL")
+    ).scalar()
+    if admins_table_exists:
+        op.execute("UPDATE admins SET role = 'SYS_ADMIN' WHERE role = 'OWNER'")
+
+    adminrole_enum = sa.Enum("OWNER", "ADMIN", "SYS_ADMIN", name="adminrole", create_type=False)
 
     op.create_table(
         "audit_logs",
@@ -29,7 +51,7 @@ def upgrade() -> None:
         sa.Column("actor_type", sa.String(length=32), nullable=False),
         sa.Column("actor_user_id", sa.Integer(), nullable=True),
         sa.Column("actor_tg_user_id", sa.BigInteger(), nullable=True),
-        sa.Column("actor_role", sa.Enum("OWNER", "ADMIN", "SYS_ADMIN", name="adminrole", create_type=False), nullable=True),
+        sa.Column("actor_role", adminrole_enum, nullable=True),
         sa.Column("action", sa.String(length=255), nullable=False),
         sa.Column("entity_type", sa.String(length=64), nullable=False),
         sa.Column("entity_id", sa.String(length=64), nullable=True),
@@ -49,4 +71,9 @@ def downgrade() -> None:
     op.drop_index("ix_audit_logs_action", table_name="audit_logs")
     op.drop_index("ix_audit_logs_created_at", table_name="audit_logs")
     op.drop_table("audit_logs")
-    op.execute("UPDATE admins SET role = 'OWNER' WHERE role = 'SYS_ADMIN'")
+    bind = op.get_bind()
+    admins_table_exists = bind.execute(
+        sa.text("SELECT to_regclass('public.admins') IS NOT NULL")
+    ).scalar()
+    if admins_table_exists:
+        op.execute("UPDATE admins SET role = 'OWNER' WHERE role = 'SYS_ADMIN'")

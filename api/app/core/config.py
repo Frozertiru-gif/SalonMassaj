@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 60
     telegram_bot_token: str | None = None
+    telegram_webhook_secret: str | None = None
+    telegram_bot_username: str | None = None
 
 
 settings = Settings()

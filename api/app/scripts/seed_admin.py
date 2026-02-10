@@ -40,12 +40,12 @@ async def seed_admin() -> None:
                 Admin(
                     email=admin_email,
                     password_hash=hash_password(admin_password),
-                    role=AdminRole.owner,
+                    role=AdminRole.sys_admin,
                     is_active=True,
                 )
             )
             await session.commit()
-            logger.info("Seeded OWNER admin: %s", admin_email)
+            logger.info("Seeded SYS_ADMIN admin: %s", admin_email)
         except SQLAlchemyError:
             logger.exception("Failed to seed admin user.")
             raise

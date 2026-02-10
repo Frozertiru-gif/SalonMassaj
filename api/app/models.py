@@ -27,8 +27,8 @@ class Base(DeclarativeBase):
 
 
 class AdminRole(str, enum.Enum):
-    owner = "OWNER"
     admin = "ADMIN"
+    sys_admin = "SYS_ADMIN"
 
 
 class BookingStatus(str, enum.Enum):
@@ -232,9 +232,40 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AuditActorType(str, enum.Enum):
+    web = "web"
+    telegram = "telegram"
+    system = "system"
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    actor_type: Mapped[AuditActorType] = mapped_column(String(32), nullable=False)
+    actor_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actor_tg_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    actor_role: Mapped[AdminRole | None] = mapped_column(ADMIN_ROLE_ENUM, nullable=True)
+    action: Mapped[str] = mapped_column(String(255), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    __table_args__ = (
+        Index("ix_audit_logs_created_at", "created_at"),
+        Index("ix_audit_logs_action", "action"),
+        Index("ix_audit_logs_entity_type_entity_id", "entity_type", "entity_id"),
+    )
+
+
 __all__ = [
     "Admin",
     "AdminRole",
+    "AuditActorType",
+    "AuditLog",
     "Base",
     "Booking",
     "BookingStatus",

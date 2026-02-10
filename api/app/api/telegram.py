@@ -9,7 +9,9 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.db import get_db
-from app.models import Booking, BookingStatus, Master
+from app.models import AdminRole, AuditActorType, Booking, BookingStatus, Master
+from app.services.access import resolve_telegram_role
+from app.services.audit import log_event
 from app.services.telegram import (
     answer_callback_query,
     booking_admin_text,
@@ -88,6 +90,23 @@ async def telegram_webhook(request: Request, db: AsyncSession = Depends(get_db))
 
 async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
     text = str(message.get("text") or "").strip()
+    tg_user = message.get("from") or {}
+    telegram_user_id = tg_user.get("id")
+    if not telegram_user_id:
+        return
+
+    role = await resolve_telegram_role(db, int(telegram_user_id))
+
+    if text in {"/admin", "/sys"}:
+        if text == "/sys" and role != AdminRole.sys_admin:
+            await send_message(chat_id=telegram_user_id, text="⛔️ Доступ запрещен")
+            return
+        if role not in {AdminRole.admin, AdminRole.sys_admin}:
+            await send_message(chat_id=telegram_user_id, text="⛔️ Доступ запрещен")
+            return
+        await send_message(chat_id=telegram_user_id, text=f"✅ Доступ разрешен. Ваша роль: {role.value}")
+        return
+
     if not text.startswith("/start"):
         return
 
@@ -95,10 +114,6 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
     if len(parts) != 2:
         return
     link_code = parts[1].strip()
-    tg_user = message.get("from") or {}
-    telegram_user_id = tg_user.get("id")
-    if not telegram_user_id:
-        return
 
     result = await db.execute(select(Master).where(Master.telegram_link_code == link_code))
     master = result.scalar_one_or_none()
@@ -120,6 +135,12 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
     message = callback_query.get("message") or {}
     actor = callback_query.get("from") or {}
     actor_name = actor.get("username") or actor.get("first_name")
+    actor_tg_user_id = actor.get("id")
+    role = await resolve_telegram_role(db, int(actor_tg_user_id) if actor_tg_user_id is not None else None)
+    if role not in {AdminRole.admin, AdminRole.sys_admin}:
+        if callback_id:
+            await answer_callback_query(callback_id, "Доступ запрещен")
+        return
 
     parsed = parse_callback_data(str(data or ""))
     if not parsed:
@@ -164,6 +185,16 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
         booking.master_id = master.id
         booking.master = master
         await db.flush()
+        await log_event(
+            db,
+            actor_type=AuditActorType.telegram,
+            actor_tg_user_id=int(actor_tg_user_id),
+            actor_role=role,
+            action="booking.assign_master",
+            entity_type="booking",
+            entity_id=booking.id,
+            meta={"master_id": master.id, "master_name": master.name},
+        )
         text = _admin_update_text(booking, f"Мастер назначен: {master.name}", actor_name)
         await edit_message_text(
             chat_id=message.get("chat", {}).get("id"),
@@ -182,6 +213,15 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
             booking.status = BookingStatus.confirmed
             booking.is_read = True
             await db.flush()
+        await log_event(
+            db,
+            actor_type=AuditActorType.telegram,
+            actor_tg_user_id=int(actor_tg_user_id),
+            actor_role=role,
+            action="booking.confirm",
+            entity_type="booking",
+            entity_id=booking.id,
+        )
         text = _admin_update_text(booking, "Подтверждено", actor_name)
         await edit_message_text(
             chat_id=message.get("chat", {}).get("id"),
@@ -203,6 +243,15 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
             booking.status = BookingStatus.cancelled
             booking.is_read = True
             await db.flush()
+        await log_event(
+            db,
+            actor_type=AuditActorType.telegram,
+            actor_tg_user_id=int(actor_tg_user_id),
+            actor_role=role,
+            action="booking.cancel",
+            entity_type="booking",
+            entity_id=booking.id,
+        )
         text = _admin_update_text(booking, "Отменено", actor_name)
         await edit_message_text(
             chat_id=message.get("chat", {}).get("id"),

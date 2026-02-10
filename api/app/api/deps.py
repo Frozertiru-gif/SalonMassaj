@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -6,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db import get_db
-from app.models import Admin
+from app.models import Admin, AdminRole
 
 security = HTTPBearer()
 
@@ -27,4 +29,28 @@ async def get_current_admin(
     admin = result.scalar_one_or_none()
     if not admin or not admin.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive admin")
+    return admin
+
+
+def require_role(required_role: AdminRole) -> Callable[[Admin], Admin]:
+    role_priority = {
+        AdminRole.admin: 1,
+        AdminRole.sys_admin: 2,
+    }
+
+    async def _role_guard(admin: Admin = Depends(get_current_admin)) -> Admin:
+        current_priority = role_priority.get(admin.role, 0)
+        required_priority = role_priority[required_role]
+        if current_priority < required_priority:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")
+        return admin
+
+    return _role_guard
+
+
+async def require_admin(admin: Admin = Depends(require_role(AdminRole.admin))) -> Admin:
+    return admin
+
+
+async def require_sys_admin(admin: Admin = Depends(require_role(AdminRole.sys_admin))) -> Admin:
     return admin

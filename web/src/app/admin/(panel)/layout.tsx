@@ -2,14 +2,18 @@ import { ReactNode } from "react";
 import { Button } from "@/components/Button";
 import { Container } from "@/components/Container";
 import { adminFetchResponse, ServiceUnavailableError } from "@/lib/api";
+import type { AdminProfile } from "@/lib/types";
 import { logoutAdmin } from "../actions";
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   let authWarning: string | null = null;
+  let adminProfile: AdminProfile | null = null;
   try {
     const response = await adminFetchResponse("/admin/auth/me", { currentPath: "/admin" });
     if (!response.ok) {
       authWarning = "Не удалось проверить сессию. Данные могут быть устаревшими.";
+    } else {
+      adminProfile = (await response.json()) as AdminProfile;
     }
   } catch (error) {
     if (error instanceof ServiceUnavailableError) {
@@ -53,6 +57,11 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             <Button href="/admin/settings" variant="ghost">
               Настройки
             </Button>
+            {adminProfile?.role === "SYS_ADMIN" ? (
+              <Button href="/admin/logs" variant="ghost">
+                Логи
+              </Button>
+            ) : null}
           </nav>
           <form action={logoutAdmin}>
             <Button type="submit" variant="secondary">

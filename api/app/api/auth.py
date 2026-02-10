@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_admin
 from app.core.security import create_access_token, verify_password
 from app.db import get_db
-from app.models import Admin
+from app.models import Admin, AuditActorType
 from app.schemas import AdminLogin, AdminOut, Token
+from app.services.audit import log_event
 
 router = APIRouter(prefix="/admin/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ async def login(payload: AdminLogin, db: AsyncSession = Depends(get_db)):
     if not admin or not admin.is_active or not verify_password(payload.password, admin.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     token = create_access_token(admin.email)
+    await log_event(db, actor_type=AuditActorType.web, actor_admin=admin, action="auth.login", entity_type="auth", entity_id=str(admin.id))
     return {"access_token": token}
 
 

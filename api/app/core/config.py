@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_webhook_secret: str | None = None
     telegram_bot_username: str | None = None
+    telegram_admin_ids: str | None = None
+    telegram_sys_admin_ids: str | None = None
 
 
 settings = Settings()

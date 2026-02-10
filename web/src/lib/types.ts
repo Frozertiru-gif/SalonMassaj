@@ -1,3 +1,25 @@
+export type AdminProfile = {
+  id: number;
+  email: string;
+  role: "ADMIN" | "SYS_ADMIN";
+  is_active: boolean;
+};
+
+export type AuditLog = {
+  id: number;
+  created_at: string;
+  actor_type: string;
+  actor_user_id?: number | null;
+  actor_tg_user_id?: number | null;
+  actor_role?: string | null;
+  action: string;
+  entity_type: string;
+  entity_id?: string | null;
+  meta: Record<string, unknown>;
+  ip?: string | null;
+  user_agent?: string | null;
+};
+
 export type ServiceCategory = {
   id: number;
   title: string;

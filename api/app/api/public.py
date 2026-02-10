@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models import Booking, BookingStatus, Notification, NotificationType, Review, Service, ServiceCategory, WeeklyRitual
-from app.schemas import AvailabilityOut, BookingCreate, BookingOut, ReviewOut, ServiceCategoryOut, ServiceOut, WeeklyRitualOut
+from app.schemas import AvailabilityOut, BookingCreate, BookingOut, BookingSlotOut, ReviewOut, ServiceCategoryOut, ServiceOut, WeeklyRitualOut
 from app.utils import get_availability_slots, get_setting
 from app.services.telegram import send_booking_notification
 
@@ -69,6 +69,13 @@ async def get_availability(service_id: int, date: date, db: AsyncSession = Depen
     now = datetime.now(timezone.utc)
     slots = await get_availability_slots(db, service_id, date, now)
     return {"slots": [{"starts_at": slot[0], "ends_at": slot[1]} for slot in slots]}
+
+
+@router.get("/bookings/slots", response_model=list[BookingSlotOut])
+async def get_booking_slots(service_id: int, date: date, db: AsyncSession = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    slots = await get_availability_slots(db, service_id, date, now)
+    return [{"time": slot[0].strftime("%H:%M"), "starts_at": slot[0], "ends_at": slot[1]} for slot in slots]
 
 
 @router.get("/settings/{key}")

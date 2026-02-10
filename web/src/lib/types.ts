@@ -73,3 +73,10 @@ export type Booking = {
 };
 
 export type SettingsPayload = Record<string, unknown>;
+
+
+export type BookingSlot = {
+  time: string;
+  starts_at: string;
+  ends_at: string;
+};

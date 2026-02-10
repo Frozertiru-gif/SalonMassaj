@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -208,6 +208,16 @@ class BookingUpdate(BaseModel):
     is_read: bool | None = None
 
 
+class BookingAdminCreate(BaseModel):
+    client_name: str | None = None
+    client_phone: str
+    service_id: int
+    date: date
+    time: time
+    comment: str | None = None
+    status: str = "NEW"
+
+
 class NotificationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -225,3 +235,9 @@ class AvailabilitySlot(BaseModel):
 
 class AvailabilityOut(BaseModel):
     slots: list[AvailabilitySlot]
+
+
+class BookingSlotOut(BaseModel):
+    time: str
+    starts_at: datetime
+    ends_at: datetime

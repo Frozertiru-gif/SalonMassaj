@@ -364,7 +364,11 @@ async def list_bookings(
     unread: bool | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Booking).order_by(Booking.starts_at.desc())
+    query = (
+        select(Booking)
+        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category))
+        .order_by(Booking.starts_at.desc())
+    )
     if status:
         try:
             status_enum = BookingStatus(status)
@@ -423,7 +427,11 @@ async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends
 
 @router.patch("/bookings/{booking_id}", response_model=BookingOut)
 async def update_booking(booking_id: int, payload: BookingUpdate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Booking).where(Booking.id == booking_id))
+    result = await db.execute(
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category))
+    )
     booking = result.scalar_one_or_none()
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
@@ -436,8 +444,12 @@ async def update_booking(booking_id: int, payload: BookingUpdate, db: AsyncSessi
     for key, value in updates.items():
         setattr(booking, key, value)
     await db.commit()
-    await db.refresh(booking)
-    return booking
+    result = await db.execute(
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category))
+    )
+    return result.scalar_one()
 
 
 @router.get("/notifications", response_model=list[NotificationOut])

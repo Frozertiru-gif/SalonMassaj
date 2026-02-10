@@ -93,6 +93,87 @@ export async function updateSetting(key: string, value_jsonb: object) {
   revalidatePath("/admin/settings");
 }
 
+export async function saveTelegramNotifications(_prevState: AdminFormState, formData: FormData): Promise<AdminFormState> {
+  const token = getAdminTokenOrRedirect();
+  const payload = {
+    enabled: formData.get("enabled") === "on",
+    admin_chat_id: (formData.get("admin_chat_id") as string | null) || null,
+    admin_thread_id: formData.get("admin_thread_id") ? Number(formData.get("admin_thread_id")) : null,
+    template_admin: (formData.get("template_admin") as string | null) || "",
+    send_inline_actions: formData.get("send_inline_actions") === "on",
+    public_webhook_base_url: (formData.get("public_webhook_base_url") as string | null) || null,
+    webhook_secret: (formData.get("webhook_secret") as string | null) || null
+  };
+
+  const response = await fetch(`${API_BASE_URL}/admin/settings/tg_notifications`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ value_jsonb: payload })
+  });
+  handleUnauthorizedResponse(response);
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось сохранить Telegram-настройки" };
+  }
+  revalidatePath("/admin/settings");
+  return { success: "Telegram-настройки сохранены" };
+}
+
+export async function sendTelegramTestMessage(_prevState: AdminFormState, formData: FormData): Promise<AdminFormState> {
+  const token = getAdminTokenOrRedirect();
+  const text = (formData.get("test_text") as string | null) || "Тестовое сообщение из админ-панели SalonMassaj";
+  const response = await fetch(`${API_BASE_URL}/admin/telegram/test-message`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ text })
+  });
+  handleUnauthorizedResponse(response);
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { error: mapAdminErrorDetail(data?.detail) || "Не удалось отправить тест" };
+  }
+  return { success: "Тестовое сообщение отправлено" };
+}
+
+export async function generateMasterTelegramLink(masterId: number): Promise<{ code: string; bot_start_link?: string | null }> {
+  const token = getAdminTokenOrRedirect();
+  const response = await fetch(`${API_BASE_URL}/admin/masters/${masterId}/telegram-link`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  handleUnauthorizedResponse(response);
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(mapAdminErrorDetail(data?.detail) || "Не удалось сгенерировать ссылку");
+  }
+  revalidatePath("/admin/masters");
+  return data as { code: string; bot_start_link?: string | null };
+}
+
+export async function unlinkMasterTelegram(masterId: number) {
+  const token = getAdminTokenOrRedirect();
+  const response = await fetch(`${API_BASE_URL}/admin/masters/${masterId}/telegram-unlink`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  handleUnauthorizedResponse(response);
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(mapAdminErrorDetail(data?.detail) || "Не удалось отвязать Telegram");
+  }
+  revalidatePath("/admin/masters");
+}
+
 export async function updateBookingStatus(id: number, status: string, is_read: boolean) {
   const token = getAdminTokenOrRedirect();
   const response = await fetch(`${API_BASE_URL}/admin/bookings/${id}`, {

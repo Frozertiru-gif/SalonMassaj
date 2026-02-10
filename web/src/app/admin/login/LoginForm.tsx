@@ -8,11 +8,12 @@ import { Button } from "@/components/Button";
 
 const initialState: LoginAdminState = {};
 
-export function LoginForm() {
+export function LoginForm({ nextPath }: { nextPath: string }) {
   const [state, formAction] = useFormState(loginAdmin, initialState);
 
   return (
     <form action={formAction} className="mt-6 space-y-4">
+      <input type="hidden" name="next" value={nextPath} />
       <div>
         <label className="text-xs font-medium text-ink-700">Email</label>
         <input

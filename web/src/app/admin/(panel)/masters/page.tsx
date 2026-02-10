@@ -1,18 +1,16 @@
-import { adminFetch } from "@/lib/api";
+import { adminFetch, adminFetchResponse } from "@/lib/api";
 import type { Master, Service } from "@/lib/types";
 import { Card } from "@/components/Card";
 import { Container } from "@/components/Container";
-import { API_BASE_URL } from "../../adminApi";
-import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 
 async function createMaster(formData: FormData) {
   "use server";
-  const token = cookies().get("admin_token")?.value;
   const serviceIds = formData.getAll("service_ids").map((value) => Number(value));
-  await fetch(`${API_BASE_URL}/admin/masters`, {
+  await adminFetchResponse("/admin/masters", {
+    currentPath: "/admin/masters",
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       name: formData.get("name"),
       photo_url: formData.get("photo_url") || null,
@@ -28,31 +26,22 @@ async function createMaster(formData: FormData) {
 
 async function deactivateMaster(formData: FormData) {
   "use server";
-  const token = cookies().get("admin_token")?.value;
   const id = Number(formData.get("id"));
-  await fetch(`${API_BASE_URL}/admin/masters/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+  await adminFetchResponse(`/admin/masters/${id}`, { currentPath: "/admin/masters", method: "DELETE" });
   revalidatePath("/admin/masters");
 }
 
 async function generateTelegramLink(formData: FormData) {
   "use server";
-  const token = cookies().get("admin_token")?.value;
   const id = Number(formData.get("id"));
-  await fetch(`${API_BASE_URL}/admin/masters/${id}/telegram-link`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  await adminFetchResponse(`/admin/masters/${id}/telegram-link`, { currentPath: "/admin/masters", method: "POST" });
   revalidatePath("/admin/masters");
 }
 
 async function unlinkTelegram(formData: FormData) {
   "use server";
-  const token = cookies().get("admin_token")?.value;
   const id = Number(formData.get("id"));
-  await fetch(`${API_BASE_URL}/admin/masters/${id}/telegram-unlink`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  await adminFetchResponse(`/admin/masters/${id}/telegram-unlink`, { currentPath: "/admin/masters", method: "POST" });
   revalidatePath("/admin/masters");
 }
 

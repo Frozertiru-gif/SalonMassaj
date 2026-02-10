@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { BookingSlot, Service } from "@/lib/types";
+import { clientAdminFetch } from "@/lib/clientApi";
 
 const STATUS_OPTIONS = ["NEW", "CONFIRMED", "CANCELLED", "DONE"] as const;
 
@@ -61,7 +62,7 @@ export function AdminBookingCreateForm({ services }: { services: Service[] }) {
     };
 
     try {
-      const response = await fetch("/api/admin/bookings", {
+      const response = await clientAdminFetch("/api/admin/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)

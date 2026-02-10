@@ -39,6 +39,7 @@ SEED_ADMIN=true ADMIN_EMAIL=owner@example.com ADMIN_PASSWORD=owner123 \
 ```
 
 Seed не создаёт дубликаты: если админ с таким email уже есть, он не будет пересоздан.
+Создаваемый через seed пользователь получает роль `SYS_ADMIN`.
 
 ## Локальный запуск без Docker
 
@@ -75,6 +76,8 @@ npm run dev
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_WEBHOOK_SECRET`
 - `TELEGRAM_BOT_USERNAME`
+- `TELEGRAM_ADMIN_IDS`
+- `TELEGRAM_SYS_ADMIN_IDS`
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD`
 - `SEED_ADMIN`
@@ -90,6 +93,8 @@ npm run dev
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_WEBHOOK_SECRET`
 - `TELEGRAM_BOT_USERNAME`
+- `TELEGRAM_ADMIN_IDS`
+- `TELEGRAM_SYS_ADMIN_IDS`
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `SEED_ADMIN` (dev seed администратора)
 
@@ -104,8 +109,37 @@ Dev-вход:
 Чтобы сменить пароль, задайте новое значение `ADMIN_PASSWORD`, удалите запись администратора из таблицы `admins`
 или обновите её вручную, затем повторно запустите seed-скрипт.
 
+Роли:
+- `ADMIN` — стандартная админка.
+- `SYS_ADMIN` — все права `ADMIN` + вкладка `Логи` (`/admin/logs`) и доступ к `GET /admin/logs`.
+
 Возможности:
 - управление услугами (включая скидки) и категориями
 - управление ритуалами недели и отзывами (публикация, сортировка)
 - просмотр записей, смена статуса/прочитано
 - настройка расписания, правил записи, контактов, Telegram-уведомлений
+- просмотр аудит-лога действий (только `SYS_ADMIN`)
+
+## Telegram-доступ админов
+
+Доступ к админским действиям Telegram-бота определяется **только по Telegram `user_id`** (whitelist),
+без логина/пароля в чате.
+
+Источник allowlist:
+1. ENV (приоритетно):
+   - `TELEGRAM_ADMIN_IDS` — список через запятую, например `123,456`
+   - `TELEGRAM_SYS_ADMIN_IDS` — список через запятую, например `789,999`
+2. Если ENV не задан, используются настройки в БД:
+   - `tg_admin_ids`
+   - `tg_sys_admin_ids`
+
+Поддерживаемые команды:
+- `/admin` — для `ADMIN` и `SYS_ADMIN`
+- `/sys` — только для `SYS_ADMIN`
+
+`SYS_ADMIN` наследует все админские Telegram-права.
+
+## Аудит-лог
+
+Сервер пишет события в таблицу `audit_logs` (не в браузер).
+Для просмотра используется endpoint `GET /admin/logs` (только `SYS_ADMIN`) и страница админки `/admin/logs`.

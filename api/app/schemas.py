@@ -96,6 +96,46 @@ class ServiceOut(ServiceBase):
     category: ServiceCategoryOut | None = None
 
 
+class MasterBase(BaseModel):
+    name: str
+    photo_url: str | None = None
+    short_bio: str | None = None
+    bio: str | None = None
+    is_active: bool = True
+    sort_order: int = 0
+    service_ids: list[int] = Field(default_factory=list)
+
+
+class MasterCreate(MasterBase):
+    pass
+
+
+class MasterUpdate(BaseModel):
+    name: str | None = None
+    photo_url: str | None = None
+    short_bio: str | None = None
+    bio: str | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
+    service_ids: list[int] | None = None
+
+
+class MasterOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    slug: str
+    photo_url: str | None = None
+    short_bio: str | None = None
+    bio: str | None = None
+    is_active: bool
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+    services: list[ServiceOut] = Field(default_factory=list)
+
+
 class WeeklyRitualBase(BaseModel):
     title: str
     slug: str | None = None
@@ -185,6 +225,7 @@ class BookingBase(BaseModel):
     service_id: int
     starts_at: datetime
     comment: str | None = None
+    master_id: int | None = None
 
 
 class BookingCreate(BookingBase):
@@ -201,19 +242,24 @@ class BookingOut(BookingBase):
     status: str
     source: str
     is_read: bool
+    admin_comment: str | None = None
     created_at: datetime
     service: ServiceOut | None = None
+    master: MasterOut | None = None
 
 
 class BookingUpdate(BaseModel):
     status: str | None = None
     is_read: bool | None = None
+    master_id: int | None = None
+    admin_comment: str | None = None
 
 
 class BookingAdminCreate(BaseModel):
     client_name: str | None = None
     client_phone: str
     service_id: int
+    master_id: int | None = None
     date: date
     time: time
     comment: str | None = None

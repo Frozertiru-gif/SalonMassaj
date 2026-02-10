@@ -8,7 +8,7 @@ import { ReviewCard } from "@/components/ReviewCard";
 import { Section } from "@/components/Section";
 import { ServiceCard } from "@/components/ServiceCard";
 import { publicFetch } from "@/lib/api";
-import type { Review, Service, WeeklyRitual } from "@/lib/types";
+import type { Master, Review, Service, WeeklyRitual } from "@/lib/types";
 
 const WeeklyRitualCarousel = dynamic(
   () => import("@/components/WeeklyRitualCarousel").then((mod) => mod.WeeklyRitualCarousel),
@@ -73,15 +73,17 @@ function RitualCarouselSkeleton() {
 }
 
 async function loadHomeData() {
-  const [servicesData, contactsData, ritualsData, reviewsData] = await Promise.allSettled([
+  const [servicesData, contactsData, ritualsData, mastersData, reviewsData] = await Promise.allSettled([
     publicFetch<Service[]>("/public/services", { revalidate: 300 }),
     publicFetch<{ value_jsonb: { phone?: string; address?: string } }>("/public/settings/contacts", { revalidate: 600 }),
     publicFetch<WeeklyRitual[]>("/public/weekly-rituals", { revalidate: 300 }),
+    publicFetch<Master[]>("/public/masters", { revalidate: 300 }),
     publicFetch<Review[]>("/public/reviews", { revalidate: 300 })
   ]);
 
   const services = servicesData.status === "fulfilled" && Array.isArray(servicesData.value) ? servicesData.value : [];
   const weeklyRituals = ritualsData.status === "fulfilled" && Array.isArray(ritualsData.value) ? ritualsData.value : [];
+  const masters = mastersData.status === "fulfilled" && Array.isArray(mastersData.value) ? mastersData.value : [];
   const publicReviews = reviewsData.status === "fulfilled" && Array.isArray(reviewsData.value) ? reviewsData.value : [];
 
   const contacts = {
@@ -95,11 +97,11 @@ async function loadHomeData() {
         : "Москва, ул. Пудровая, 12"
   };
 
-  return { services, weeklyRituals, publicReviews, contacts };
+  return { services, weeklyRituals, masters, publicReviews, contacts };
 }
 
 export default async function HomePage() {
-  const { services, weeklyRituals, publicReviews, contacts } = await loadHomeData();
+  const { services, weeklyRituals, masters, publicReviews, contacts } = await loadHomeData();
   const servicesPreview = services.slice(0, 12);
 
   return (
@@ -232,6 +234,28 @@ export default async function HomePage() {
         </Container>
       </Section>
 
+      {masters.length > 0 ? (
+        <Section>
+          <Container>
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Команда</p>
+                <h2 className="text-3xl font-semibold text-ink-900">Наши мастера</h2>
+              </div>
+              <Button href="/masters" variant="ghost">Смотреть всех</Button>
+            </div>
+            <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+              {masters.slice(0, 4).map((master) => (
+                <Card key={master.id}>
+                  <h3 className="text-lg font-semibold text-ink-900">{master.name}</h3>
+                  <p className="mt-2 text-sm text-ink-700">{master.short_bio ?? "Эксперт SlimFox"}</p>
+                </Card>
+              ))}
+            </div>
+          </Container>
+        </Section>
+      ) : null}
+
       {publicReviews.length > 0 ? (
         <Section id="reviews" className="bg-white/70">
           <Container>
@@ -285,7 +309,7 @@ export default async function HomePage() {
             </div>
           </div>
           <Card>
-            <HomeBookingForm services={services} />
+            <HomeBookingForm services={services} masters={masters} />
           </Card>
         </Container>
       </Section>

@@ -1,15 +1,15 @@
 import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin
 from app.db import get_db
-from app.models import Booking, BookingStatus, Notification, Review, Service, ServiceCategory, Setting, WeeklyRitual
+from app.models import Booking, BookingStatus, Master, Notification, Review, Service, ServiceCategory, Setting, WeeklyRitual
 from app.services.bookings import resolve_available_slot
 from app.utils import get_availability_slots
 from app.schemas import (
@@ -17,6 +17,9 @@ from app.schemas import (
     BookingOut,
     BookingSlotOut,
     BookingUpdate,
+    MasterCreate,
+    MasterOut,
+    MasterUpdate,
     NotificationOut,
     ReviewCreate,
     ReviewOut,
@@ -169,6 +172,69 @@ async def delete_service(service_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
     return {"status": "deleted"}
 
+
+
+
+@router.get("/masters", response_model=list[MasterOut])
+async def list_masters(q: str | None = None, db: AsyncSession = Depends(get_db)):
+    query = select(Master).options(selectinload(Master.services).selectinload(Service.category)).order_by(Master.sort_order, Master.name)
+    if q:
+        query = query.where(or_(Master.name.ilike(f"%{q}%"), Master.slug.ilike(f"%{q}%")))
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
+@router.post("/masters", response_model=MasterOut)
+async def create_master(payload: MasterCreate, db: AsyncSession = Depends(get_db)):
+    payload_data = payload.model_dump()
+    service_ids = payload_data.pop("service_ids", [])
+    base_slug = normalize_slug(payload.name or "")
+    existing_slugs = set((await db.execute(select(Master.slug).where(Master.slug.like(f"{base_slug}%")))).scalars().all())
+    payload_data["slug"] = pick_unique_slug(base_slug, existing_slugs)
+    master = Master(**payload_data)
+    if service_ids:
+        services = (await db.execute(select(Service).where(Service.id.in_(service_ids)))).scalars().all()
+        master.services = services
+    db.add(master)
+    await db.flush()
+    result = await db.execute(select(Master).where(Master.id == master.id).options(selectinload(Master.services).selectinload(Service.category)))
+    return result.scalar_one()
+
+
+@router.put("/masters/{master_id}", response_model=MasterOut)
+async def update_master(master_id: int, payload: MasterUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Master).where(Master.id == master_id).options(selectinload(Master.services)))
+    master = result.scalar_one_or_none()
+    if not master:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
+    updates = payload.model_dump(exclude_unset=True)
+    service_ids = updates.pop("service_ids", None)
+    if "name" in updates and updates["name"]:
+        normalized = normalize_slug(updates["name"])
+        exists = await db.execute(select(Master.id).where(Master.slug == normalized, Master.id != master_id))
+        if exists.scalar_one_or_none() is None:
+            updates["slug"] = normalized
+    for key, value in updates.items():
+        setattr(master, key, value)
+    if service_ids is not None:
+        services = []
+        if service_ids:
+            services = (await db.execute(select(Service).where(Service.id.in_(service_ids)))).scalars().all()
+        master.services = services
+    await db.commit()
+    result = await db.execute(select(Master).where(Master.id == master.id).options(selectinload(Master.services).selectinload(Service.category)))
+    return result.scalar_one()
+
+
+@router.delete("/masters/{master_id}")
+async def delete_master(master_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Master).where(Master.id == master_id))
+    master = result.scalar_one_or_none()
+    if not master:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
+    master.is_active = False
+    await db.commit()
+    return {"status": "deactivated"}
 
 @router.get("/categories", response_model=list[ServiceCategoryOut])
 async def list_categories(db: AsyncSession = Depends(get_db)):
@@ -360,18 +426,27 @@ async def update_setting(key: str, payload: SettingUpdate, db: AsyncSession = De
 
 @router.get("/bookings", response_model=list[BookingOut])
 async def list_bookings(
-    status: str | None = None,
+    booking_status: str | None = Query(default=None, alias="status"),
     unread: bool | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    service_id: int | None = None,
+    master_id: int | None = None,
+    q: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     query = (
         select(Booking)
-        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category))
+        .options(
+            selectinload(Booking.service),
+            selectinload(Booking.service).selectinload(Service.category),
+            selectinload(Booking.master).selectinload(Master.services),
+        )
         .order_by(Booking.starts_at.desc())
     )
-    if status:
+    if booking_status:
         try:
-            status_enum = BookingStatus(status)
+            status_enum = BookingStatus(booking_status)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status") from exc
         query = query.where(Booking.status == status_enum)
@@ -379,24 +454,34 @@ async def list_bookings(
         query = query.where(Booking.is_read.is_(False))
     if unread is False:
         query = query.where(Booking.is_read.is_(True))
+    if date_from:
+        query = query.where(Booking.starts_at >= datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc))
+    if date_to:
+        query = query.where(Booking.starts_at <= datetime.strptime(date_to, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=timezone.utc))
+    if service_id is not None:
+        query = query.where(Booking.service_id == service_id)
+    if master_id is not None:
+        query = query.where(Booking.master_id == master_id)
+    if q:
+        query = query.where(or_(Booking.client_name.ilike(f"%{q}%"), Booking.client_phone.ilike(f"%{q}%")))
     result = await db.execute(query)
     return result.scalars().all()
 
 
 @router.get("/bookings/slots", response_model=list[BookingSlotOut])
-async def list_booking_slots(service_id: int, date: str, db: AsyncSession = Depends(get_db)):
+async def list_booking_slots(service_id: int, date: str, master_id: int | None = None, db: AsyncSession = Depends(get_db)):
     try:
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid date format") from exc
-    slots = await get_availability_slots(db, service_id, target_date, datetime.now(timezone.utc))
+    slots = await get_availability_slots(db, service_id, target_date, datetime.now(timezone.utc), master_id=master_id)
     return [{"time": slot[0].strftime("%H:%M"), "starts_at": slot[0], "ends_at": slot[1]} for slot in slots]
 
 
 @router.post("/bookings", response_model=BookingOut)
 async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends(get_db)):
     requested_start = datetime.combine(payload.date, payload.time, tzinfo=timezone.utc)
-    chosen = await resolve_available_slot(db, payload.service_id, requested_start, datetime.now(timezone.utc))
+    chosen = await resolve_available_slot(db, payload.service_id, requested_start, datetime.now(timezone.utc), master_id=payload.master_id)
 
     try:
         booking_status = BookingStatus(payload.status)
@@ -407,6 +492,7 @@ async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends
         client_name=payload.client_name or payload.client_phone,
         client_phone=payload.client_phone,
         service_id=payload.service_id,
+        master_id=payload.master_id,
         starts_at=chosen[0],
         ends_at=chosen[1],
         comment=payload.comment,
@@ -420,7 +506,7 @@ async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends
     result = await db.execute(
         select(Booking)
         .where(Booking.id == booking.id)
-        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category))
+        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category), selectinload(Booking.master).selectinload(Master.services))
     )
     return result.scalar_one()
 
@@ -430,7 +516,7 @@ async def update_booking(booking_id: int, payload: BookingUpdate, db: AsyncSessi
     result = await db.execute(
         select(Booking)
         .where(Booking.id == booking_id)
-        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category))
+        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category), selectinload(Booking.master).selectinload(Master.services))
     )
     booking = result.scalar_one_or_none()
     if not booking:
@@ -441,13 +527,17 @@ async def update_booking(booking_id: int, payload: BookingUpdate, db: AsyncSessi
             updates["status"] = BookingStatus(updates["status"])
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status") from exc
+    if "master_id" in updates and updates["master_id"] is not None:
+        master = (await db.execute(select(Master).where(Master.id == updates["master_id"]))).scalar_one_or_none()
+        if not master or not master.is_active:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid master")
     for key, value in updates.items():
         setattr(booking, key, value)
     await db.commit()
     result = await db.execute(
         select(Booking)
         .where(Booking.id == booking_id)
-        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category))
+        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category), selectinload(Booking.master).selectinload(Master.services))
     )
     return result.scalar_one()
 

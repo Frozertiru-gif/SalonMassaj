@@ -1,7 +1,7 @@
 import enum
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, Date, DateTime, Enum, ForeignKey, Index, Integer, String, Table, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -99,6 +99,35 @@ class Service(Base):
     )
 
     category: Mapped[ServiceCategory] = relationship(back_populates="services")
+    masters: Mapped[list["Master"]] = relationship(secondary="master_services", back_populates="services")
+
+
+master_services = Table(
+    "master_services",
+    Base.metadata,
+    Column("master_id", ForeignKey("masters.id"), primary_key=True),
+    Column("service_id", ForeignKey("services.id"), primary_key=True),
+    UniqueConstraint("master_id", "service_id", name="uq_master_services_master_id_service_id"),
+)
+
+
+class Master(Base):
+    __tablename__ = "masters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    photo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    short_bio: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    services: Mapped[list[Service]] = relationship(secondary="master_services", back_populates="masters")
 
 
 class Setting(Base):
@@ -152,20 +181,24 @@ class Booking(Base):
     client_name: Mapped[str] = mapped_column(String(255))
     client_phone: Mapped[str] = mapped_column(String(50))
     service_id: Mapped[int] = mapped_column(ForeignKey("services.id"))
+    master_id: Mapped[int | None] = mapped_column(ForeignKey("masters.id"), nullable=True)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[BookingStatus] = mapped_column(BOOKING_STATUS_ENUM, default=BookingStatus.new)
     source: Mapped[str] = mapped_column(String(50), default="WEB")
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    admin_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     service: Mapped[Service] = relationship()
+    master: Mapped[Master | None] = relationship()
 
     __table_args__ = (
         Index("ix_bookings_starts_at", "starts_at"),
         Index("ix_bookings_status", "status"),
         Index("ix_bookings_is_read", "is_read"),
+        Index("ix_bookings_master_id", "master_id"),
     )
 
 
@@ -187,6 +220,7 @@ __all__ = [
     "BookingStatus",
     "Notification",
     "NotificationType",
+    "Master",
     "Review",
     "Service",
     "ServiceCategory",

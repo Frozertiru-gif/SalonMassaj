@@ -1,9 +1,9 @@
 from datetime import date, datetime, time, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Booking, BookingStatus, Service, Setting
+from app.models import Booking, BookingStatus, Master, Service, Setting, master_services
 
 DAY_MAP = {
     0: "mon",
@@ -39,14 +39,29 @@ def parse_time(value: str) -> time:
     return datetime.strptime(value, "%H:%M").time()
 
 
+async def _service_exists(db: AsyncSession, service_id: int) -> Service | None:
+    service_result = await db.execute(select(Service).where(Service.id == service_id))
+    return service_result.scalar_one_or_none()
+
+
+async def get_service_master_ids(db: AsyncSession, service_id: int) -> list[int]:
+    query = (
+        select(Master.id)
+        .join(master_services, master_services.c.master_id == Master.id)
+        .where(master_services.c.service_id == service_id, Master.is_active.is_(True))
+    )
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
 async def get_availability_slots(
     db: AsyncSession,
     service_id: int,
     target_date: date,
     now: datetime,
+    master_id: int | None = None,
 ) -> list[tuple[datetime, datetime]]:
-    service_result = await db.execute(select(Service).where(Service.id == service_id))
-    service = service_result.scalar_one_or_none()
+    service = await _service_exists(db, service_id)
     if not service:
         return []
 
@@ -90,20 +105,52 @@ async def get_availability_slots(
     if not slots:
         return []
 
-    result = await db.execute(
-        select(Booking).where(
-            Booking.status.in_([BookingStatus.new, BookingStatus.confirmed]),
-            Booking.starts_at < slots[-1][1],
-            Booking.ends_at > slots[0][0],
+    from_dt = slots[0][0]
+    to_dt = slots[-1][1]
+
+    base_booking_filter = [
+        Booking.status.in_([BookingStatus.new, BookingStatus.confirmed]),
+        Booking.starts_at < to_dt,
+        Booking.ends_at > from_dt,
+    ]
+
+    if master_id is not None:
+        master_exists = await db.execute(
+            select(Master.id)
+            .join(master_services, and_(master_services.c.master_id == Master.id, master_services.c.service_id == service_id))
+            .where(Master.id == master_id, Master.is_active.is_(True))
         )
-    )
+        if master_exists.scalar_one_or_none() is None:
+            return []
+
+        result = await db.execute(select(Booking).where(*base_booking_filter, Booking.master_id == master_id))
+        bookings = result.scalars().all()
+        return [
+            (slot_start, slot_end)
+            for slot_start, slot_end in slots
+            if not any(booking.starts_at < slot_end and booking.ends_at > slot_start for booking in bookings)
+        ]
+
+    master_ids = await get_service_master_ids(db, service_id)
+    if not master_ids:
+        return []
+
+    result = await db.execute(select(Booking).where(*base_booking_filter))
     bookings = result.scalars().all()
 
     available: list[tuple[datetime, datetime]] = []
     for slot_start, slot_end in slots:
-        overlaps = any(
-            booking.starts_at < slot_end and booking.ends_at > slot_start for booking in bookings
+        occupied_master_ids = {
+            booking.master_id
+            for booking in bookings
+            if booking.master_id is not None and booking.master_id in master_ids and booking.starts_at < slot_end and booking.ends_at > slot_start
+        }
+        unassigned_overlaps = sum(
+            1
+            for booking in bookings
+            if booking.master_id is None and booking.starts_at < slot_end and booking.ends_at > slot_start
         )
-        if not overlaps:
+        free_capacity = len(master_ids) - len(occupied_master_ids) - unassigned_overlaps
+        if free_capacity > 0:
             available.append((slot_start, slot_end))
     return available

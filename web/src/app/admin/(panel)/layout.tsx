@@ -58,6 +58,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             <Button href="/admin/bookings" variant="ghost">
               Записи
             </Button>
+            <Button href="/admin/masters" variant="ghost">
+              Мастера
+            </Button>
             <Button href="/admin/settings" variant="ghost">
               Настройки
             </Button>

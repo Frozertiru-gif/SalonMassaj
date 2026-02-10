@@ -470,3 +470,22 @@ export async function deleteReview(
   revalidatePath("/admin/reviews");
   return { success: "Отзыв удалён" };
 }
+
+
+export async function updateBookingAdmin(payload: { id: number; status?: string; is_read?: boolean; master_id?: number | null; admin_comment?: string | null }) {
+  const token = getAdminTokenOrRedirect();
+  const response = await fetch(`${API_BASE_URL}/admin/bookings/${payload.id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+  handleUnauthorizedResponse(response);
+  if (!response.ok) {
+    throw new Error("Failed to update booking");
+  }
+  revalidatePath("/admin/bookings");
+  revalidatePath("/admin");
+}

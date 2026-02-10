@@ -26,6 +26,19 @@ export type Service = {
   seo_description?: string | null;
 };
 
+
+export type Master = {
+  id: number;
+  name: string;
+  slug: string;
+  photo_url?: string | null;
+  short_bio?: string | null;
+  bio?: string | null;
+  is_active: boolean;
+  sort_order: number;
+  services?: Service[];
+};
+
 export type WeeklyRitual = {
   id: number;
   title: string;
@@ -69,7 +82,10 @@ export type Booking = {
   status: string;
   source: string;
   is_read: boolean;
+  admin_comment?: string | null;
   created_at: string;
+  service?: Service;
+  master?: Master | null;
 };
 
 export type SettingsPayload = Record<string, unknown>;

@@ -1,33 +1,22 @@
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { ReactNode } from "react";
 import { Button } from "@/components/Button";
 import { Container } from "@/components/Container";
+import { adminFetchResponse, ServiceUnavailableError } from "@/lib/api";
 import { logoutAdmin } from "../actions";
-import { API_BASE_URL } from "../adminApi";
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
-  const token = cookies().get("admin_token")?.value;
-  if (!token) {
-    redirect("/admin/login");
-  }
   let authWarning: string | null = null;
   try {
-    const response = await fetch(`${API_BASE_URL}/admin/auth/me`, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
-      cache: "no-store"
-    });
-    if (response.status === 401 || response.status === 403) {
-      cookies().delete("admin_token");
-      redirect("/admin/login");
-    }
+    const response = await adminFetchResponse("/admin/auth/me", { currentPath: "/admin" });
     if (!response.ok) {
       authWarning = "Не удалось проверить сессию. Данные могут быть устаревшими.";
     }
-  } catch {
-    authWarning = "Не удалось проверить сессию. Данные могут быть устаревшими.";
+  } catch (error) {
+    if (error instanceof ServiceUnavailableError) {
+      authWarning = "Не удалось проверить сессию. Данные могут быть устаревшими.";
+    } else {
+      throw error;
+    }
   }
 
   return (

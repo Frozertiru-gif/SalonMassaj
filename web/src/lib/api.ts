@@ -1,5 +1,9 @@
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import {
+  ADMIN_TOKEN_COOKIE,
+  isAuthDetail,
+  redirectToAdminLogin
+} from "@/lib/auth";
 
 type PublicFetchInit = RequestInit & {
   revalidate?: number;
@@ -10,7 +14,6 @@ type AdminFetchInit = RequestInit & {
 };
 
 const API_SERVER_URL = process.env.API_INTERNAL_BASE_URL ?? process.env.API_URL ?? "http://localhost:8000";
-const ADMIN_LOGIN_PATH = "/admin/login";
 
 export class ServiceUnavailableError extends Error {
   constructor() {
@@ -23,23 +26,13 @@ function isServiceUnavailableStatus(status: number): boolean {
   return status === 502 || status === 503 || status === 504;
 }
 
-function shouldSkipLoginRedirect(currentPath?: string): boolean {
-  return currentPath === ADMIN_LOGIN_PATH;
-}
-
-function handleAdminAuthFailure(currentPath?: string): never {
-  if (typeof window === "undefined") {
-    cookies().delete("admin_token");
-    if (!shouldSkipLoginRedirect(currentPath)) {
-      redirect(ADMIN_LOGIN_PATH);
-    }
+function getAuthErrorDetail(data: unknown): string | null {
+  if (!data || typeof data !== "object") {
+    return null;
   }
 
-  if (!shouldSkipLoginRedirect(currentPath ?? window.location.pathname)) {
-    window.location.replace(ADMIN_LOGIN_PATH);
-  }
-
-  throw new Error("Требуется повторный вход в админ-панель");
+  const detail = "detail" in data ? (data as { detail?: unknown }).detail : undefined;
+  return typeof detail === "string" ? detail : null;
 }
 
 export async function publicFetch<T>(path: string, init?: PublicFetchInit): Promise<T> {
@@ -56,16 +49,15 @@ export async function publicFetch<T>(path: string, init?: PublicFetchInit): Prom
   return (await response.json()) as T;
 }
 
-export async function adminFetch<T>(path: string, init?: AdminFetchInit): Promise<T> {
+export async function adminFetchResponse(path: string, init?: AdminFetchInit): Promise<Response> {
   const { currentPath, ...requestInit } = init ?? {};
-  const token = cookies().get("admin_token")?.value;
+  const token = cookies().get(ADMIN_TOKEN_COOKIE)?.value;
 
   if (!token) {
-    handleAdminAuthFailure(currentPath);
+    redirectToAdminLogin(currentPath);
   }
 
   let response: Response;
-
   try {
     response = await fetch(`${API_SERVER_URL}${path}`, {
       ...requestInit,
@@ -81,7 +73,7 @@ export async function adminFetch<T>(path: string, init?: AdminFetchInit): Promis
   }
 
   if (response.status === 401 || response.status === 403) {
-    handleAdminAuthFailure(currentPath);
+    redirectToAdminLogin(currentPath);
   }
 
   if (!response.ok) {
@@ -90,7 +82,22 @@ export async function adminFetch<T>(path: string, init?: AdminFetchInit): Promis
     }
 
     const data = await response.json().catch(() => null);
-    throw new Error(data?.detail || `API error: ${response.status}`);
+    const detail = getAuthErrorDetail(data);
+    if (isAuthDetail(detail)) {
+      redirectToAdminLogin(currentPath);
+    }
+  }
+
+  return response;
+}
+
+export async function adminFetch<T>(path: string, init?: AdminFetchInit): Promise<T> {
+  const response = await adminFetchResponse(path, init);
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    const detail = getAuthErrorDetail(data);
+    throw new Error(detail || `API error: ${response.status}`);
   }
 
   return (await response.json()) as T;

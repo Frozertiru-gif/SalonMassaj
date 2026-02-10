@@ -34,6 +34,28 @@ async function deactivateMaster(formData: FormData) {
   revalidatePath("/admin/masters");
 }
 
+async function generateTelegramLink(formData: FormData) {
+  "use server";
+  const token = cookies().get("admin_token")?.value;
+  const id = Number(formData.get("id"));
+  await fetch(`${API_BASE_URL}/admin/masters/${id}/telegram-link`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  revalidatePath("/admin/masters");
+}
+
+async function unlinkTelegram(formData: FormData) {
+  "use server";
+  const token = cookies().get("admin_token")?.value;
+  const id = Number(formData.get("id"));
+  await fetch(`${API_BASE_URL}/admin/masters/${id}/telegram-unlink`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  revalidatePath("/admin/masters");
+}
+
 export default async function AdminMastersPage() {
   const [masters, services] = await Promise.all([adminFetch<Master[]>("/admin/masters"), adminFetch<Service[]>("/admin/services")]);
 
@@ -61,15 +83,29 @@ export default async function AdminMastersPage() {
       <div className="space-y-3">
         {masters.map((master) => (
           <Card key={master.id}>
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="font-medium text-ink-900">{master.name}</p>
                 <p className="text-xs text-ink-500">{master.short_bio ?? "—"}</p>
+                <p className="mt-1 text-xs text-ink-600">TG: {master.telegram_user_id ? "привязан" : "не привязан"}</p>
+                {master.telegram_link_code ? (
+                  <p className="text-xs text-ink-600">Код привязки: <span className="font-mono">{master.telegram_link_code}</span></p>
+                ) : null}
               </div>
-              <form action={deactivateMaster}>
-                <input type="hidden" name="id" value={master.id} />
-                <button className="rounded-full border border-blush-200 px-3 py-1 text-xs">Деактивировать</button>
-              </form>
+              <div className="flex flex-wrap gap-2">
+                <form action={generateTelegramLink}>
+                  <input type="hidden" name="id" value={master.id} />
+                  <button className="rounded-full border border-blush-200 px-3 py-1 text-xs" type="submit">Сгенерировать ссылку</button>
+                </form>
+                <form action={unlinkTelegram}>
+                  <input type="hidden" name="id" value={master.id} />
+                  <button className="rounded-full border border-blush-200 px-3 py-1 text-xs" type="submit">Отвязать TG</button>
+                </form>
+                <form action={deactivateMaster}>
+                  <input type="hidden" name="id" value={master.id} />
+                  <button className="rounded-full border border-blush-200 px-3 py-1 text-xs">Деактивировать</button>
+                </form>
+              </div>
             </div>
           </Card>
         ))}

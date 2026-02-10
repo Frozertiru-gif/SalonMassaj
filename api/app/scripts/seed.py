@@ -22,7 +22,15 @@ DEFAULT_SETTINGS = {
         "address": "Москва, ул. Пудровая, 12",
         "socials": ["https://t.me/salonmassaj"],
     },
-    "tg_notifications": {"enabled": False, "chat_id": None, "thread_id": None, "template": "Новая запись: {client_name} ({client_phone})\n{starts_at}"},
+    "tg_notifications": {
+        "enabled": False,
+        "admin_chat_id": None,
+        "admin_thread_id": None,
+        "template_admin": "Новая запись: {client_name} ({client_phone})\nУслуга: {service_title}\nВремя: {starts_at_human}",
+        "send_inline_actions": True,
+        "public_webhook_base_url": None,
+        "webhook_secret": None,
+    },
 }
 
 

@@ -13,14 +13,14 @@ from app.schemas import (
     BookingCreate,
     BookingOut,
     BookingSlotOut,
-    MasterOut,
+    MasterPublicOut,
     ReviewOut,
     ServiceCategoryOut,
     ServiceOut,
     WeeklyRitualOut,
 )
 from app.services.bookings import booking_validation_error, normalize_booking_start, resolve_available_slot
-from app.services.telegram import send_booking_notification
+from app.services.telegram import build_booking_notification_payload, send_booking_notification
 from app.utils import get_availability_slots, get_setting
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -46,7 +46,7 @@ async def get_service(slug: str, db: AsyncSession = Depends(get_db)):
     return service
 
 
-@router.get("/masters", response_model=list[MasterOut])
+@router.get("/masters", response_model=list[MasterPublicOut])
 async def list_masters(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Master)
@@ -57,7 +57,7 @@ async def list_masters(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
-@router.get("/masters/{slug}", response_model=MasterOut)
+@router.get("/masters/{slug}", response_model=MasterPublicOut)
 async def get_master(slug: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Master)
@@ -144,20 +144,7 @@ async def create_booking(payload: BookingCreate, db: AsyncSession = Depends(get_
     db.add(booking)
     await db.flush()
 
-    notification = {
-        "booking_id": booking.id,
-        "service_id": booking.service_id,
-        "master_id": booking.master_id,
-        "starts_at": booking.starts_at.isoformat(),
-        "client_name": booking.client_name,
-        "client_phone": booking.client_phone,
-    }
-
-    db.add(Notification(type=NotificationType.booking_created, payload=notification, is_read=False))
-
-    await send_booking_notification(db, notification)
-
-    result = await db.execute(
+    booking_result = await db.execute(
         select(Booking)
         .where(Booking.id == booking.id)
         .options(
@@ -166,4 +153,12 @@ async def create_booking(payload: BookingCreate, db: AsyncSession = Depends(get_
             selectinload(Booking.master).selectinload(Master.services),
         )
     )
-    return result.scalar_one()
+    booking_full = booking_result.scalar_one()
+
+    notification = await build_booking_notification_payload(db, booking_full)
+
+    db.add(Notification(type=NotificationType.booking_created, payload=notification, is_read=False))
+
+    await send_booking_notification(db, notification)
+
+    return booking_full

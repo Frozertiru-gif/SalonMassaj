@@ -1,4 +1,5 @@
 import re
+import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,9 +9,11 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin
+from app.core.config import settings
 from app.db import get_db
 from app.models import Booking, BookingStatus, Master, Notification, Review, Service, ServiceCategory, Setting, WeeklyRitual
 from app.services.bookings import resolve_available_slot
+from app.services.telegram import get_tg_notifications_settings, normalize_tg_notifications, send_message
 from app.utils import get_availability_slots
 from app.schemas import (
     BookingAdminCreate,
@@ -32,6 +35,10 @@ from app.schemas import (
     ServiceUpdate,
     SettingOut,
     SettingUpdate,
+    MasterTelegramLinkOut,
+    MasterTelegramUnlinkOut,
+    TelegramTestMessageIn,
+    TelegramTestMessageOut,
     WeeklyRitualCreate,
     WeeklyRitualOut,
     WeeklyRitualUpdate,
@@ -233,6 +240,37 @@ async def delete_master(master_id: int, db: AsyncSession = Depends(get_db)):
     master.is_active = False
     return {"status": "deactivated"}
 
+
+
+@router.post("/masters/{master_id}/telegram-link", response_model=MasterTelegramLinkOut)
+async def regenerate_master_telegram_link(master_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Master).where(Master.id == master_id))
+    master = result.scalar_one_or_none()
+    if not master:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
+
+    code = secrets.token_urlsafe(18)
+    master.telegram_link_code = code
+    await db.flush()
+
+    bot_username = settings.telegram_bot_username
+    bot_start_link = f"https://t.me/{bot_username}?start={code}" if bot_username else None
+    return MasterTelegramLinkOut(master_id=master.id, code=code, bot_start_link=bot_start_link)
+
+
+@router.post("/masters/{master_id}/telegram-unlink", response_model=MasterTelegramUnlinkOut)
+async def unlink_master_telegram(master_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Master).where(Master.id == master_id))
+    master = result.scalar_one_or_none()
+    if not master:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
+
+    master.telegram_user_id = None
+    master.telegram_linked_at = None
+    await db.flush()
+    return MasterTelegramUnlinkOut(master_id=master.id, unlinked=True)
+
+
 @router.get("/categories", response_model=list[ServiceCategoryOut])
 async def list_categories(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ServiceCategory).order_by(ServiceCategory.sort_order, ServiceCategory.title))
@@ -392,7 +430,11 @@ async def get_setting(key: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Setting).where(Setting.key == key))
     setting = result.scalar_one_or_none()
     if not setting:
+        if key == "tg_notifications":
+            return {"key": key, "value_jsonb": normalize_tg_notifications({}).model_dump(), "updated_at": None}
         return {"key": key, "value_jsonb": {}, "updated_at": None}
+    if key == "tg_notifications":
+        setting.value_jsonb = normalize_tg_notifications(setting.value_jsonb).model_dump()
     return setting
 
 
@@ -402,16 +444,42 @@ async def update_setting(key: str, payload: SettingUpdate, db: AsyncSession = De
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid setting key")
     if not isinstance(payload.value_jsonb, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid setting value")
+
+    value_jsonb = payload.value_jsonb
+    if key == "tg_notifications":
+        value_jsonb = normalize_tg_notifications(value_jsonb).model_dump()
+
     result = await db.execute(select(Setting).where(Setting.key == key))
     setting = result.scalar_one_or_none()
     if setting:
-        setting.value_jsonb = payload.value_jsonb
+        setting.value_jsonb = value_jsonb
     else:
-        setting = Setting(key=key, value_jsonb=payload.value_jsonb)
+        setting = Setting(key=key, value_jsonb=value_jsonb)
         db.add(setting)
     await db.flush()
     await db.refresh(setting)
     return setting
+
+
+
+
+@router.post("/telegram/test-message", response_model=TelegramTestMessageOut)
+async def send_telegram_test_message(payload: TelegramTestMessageIn, db: AsyncSession = Depends(get_db)):
+    if not settings.telegram_bot_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="TELEGRAM_BOT_TOKEN is not configured")
+
+    tg_settings = await get_tg_notifications_settings(db)
+    if not tg_settings.enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram notifications are disabled")
+    if not tg_settings.admin_chat_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="admin_chat_id is not configured")
+
+    await send_message(
+        chat_id=tg_settings.admin_chat_id,
+        text=payload.text,
+        thread_id=tg_settings.admin_thread_id,
+    )
+    return TelegramTestMessageOut(ok=True, detail="Test message sent")
 
 
 @router.get("/bookings", response_model=list[BookingOut])

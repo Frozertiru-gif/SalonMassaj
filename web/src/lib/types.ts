@@ -36,6 +36,9 @@ export type Master = {
   bio?: string | null;
   is_active: boolean;
   sort_order: number;
+  telegram_user_id?: number | null;
+  telegram_link_code?: string | null;
+  telegram_linked_at?: string | null;
   services?: Service[];
 };
 

@@ -120,7 +120,9 @@ class MasterUpdate(BaseModel):
     service_ids: list[int] | None = None
 
 
-class MasterOut(BaseModel):
+
+
+class MasterPublicOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -134,6 +136,36 @@ class MasterOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     services: list[ServiceOut] = Field(default_factory=list)
+
+
+class MasterOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    slug: str
+    photo_url: str | None = None
+    short_bio: str | None = None
+    bio: str | None = None
+    is_active: bool
+    sort_order: int
+    telegram_user_id: int | None = None
+    telegram_link_code: str | None = None
+    telegram_linked_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    services: list[ServiceOut] = Field(default_factory=list)
+
+
+class MasterTelegramLinkOut(BaseModel):
+    master_id: int
+    code: str
+    bot_start_link: str | None = None
+
+
+class MasterTelegramUnlinkOut(BaseModel):
+    master_id: int
+    unlinked: bool
 
 
 class WeeklyRitualBase(BaseModel):
@@ -219,6 +251,25 @@ class SettingUpdate(BaseModel):
     value_jsonb: dict[str, Any]
 
 
+class TgNotificationsSettings(BaseModel):
+    enabled: bool = False
+    admin_chat_id: str | int | None = None
+    admin_thread_id: int | None = None
+    template_admin: str = "Новая запись: {client_name} ({client_phone})\nУслуга: {service_title}\n{starts_at_human}"
+    send_inline_actions: bool = True
+    public_webhook_base_url: str | None = None
+    webhook_secret: str | None = None
+
+
+class TelegramTestMessageIn(BaseModel):
+    text: str = "Тестовое сообщение из админ-панели SalonMassaj"
+
+
+class TelegramTestMessageOut(BaseModel):
+    ok: bool
+    detail: str
+
+
 class BookingBase(BaseModel):
     client_name: str
     client_phone: str
@@ -246,7 +297,7 @@ class BookingOut(BookingBase):
     final_price_cents: int | None = Field(default=None, ge=0)
     created_at: datetime
     service: ServiceOut | None = None
-    master: MasterOut | None = None
+    master: MasterPublicOut | None = None
 
 
 class BookingUpdate(BaseModel):

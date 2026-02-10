@@ -110,9 +110,7 @@ def pick_unique_slug(base_slug: str, existing_slugs: set[str]) -> str:
     return base_slug
 
 
-def _request_context(request: Request | None) -> tuple[str | None, str | None]:
-    if request is None:
-        return None, None
+def _request_context(request: Request) -> tuple[str | None, str | None]:
     return request.client.host if request.client else None, request.headers.get("user-agent")
 
 
@@ -123,7 +121,7 @@ async def list_services(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/services", response_model=ServiceOut)
-async def create_service(payload: ServiceCreate, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
+async def create_service(payload: ServiceCreate, request: Request, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin)):
     payload_data = payload.model_dump()
     raw_slug = payload.slug
     base_slug = normalize_slug((raw_slug or payload.title) or "")
@@ -154,7 +152,7 @@ async def create_service(payload: ServiceCreate, db: AsyncSession = Depends(get_
 
 
 @router.put("/services/{service_id}", response_model=ServiceOut)
-async def update_service(service_id: int, payload: ServiceUpdate, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
+async def update_service(service_id: int, payload: ServiceUpdate, request: Request, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin)):
     result = await db.execute(select(Service).where(Service.id == service_id))
     service = result.scalar_one_or_none()
     if not service:
@@ -181,7 +179,7 @@ async def update_service(service_id: int, payload: ServiceUpdate, db: AsyncSessi
 
 
 @router.delete("/services/{service_id}")
-async def delete_service(service_id: int, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
+async def delete_service(service_id: int, request: Request, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin)):
     result = await db.execute(select(Service).where(Service.id == service_id))
     service = result.scalar_one_or_none()
     if not service:
@@ -453,7 +451,7 @@ async def get_setting(key: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/settings/{key}", response_model=SettingOut)
-async def update_setting(key: str, payload: SettingUpdate, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
+async def update_setting(key: str, payload: SettingUpdate, request: Request, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin)):
     if key not in {"business_hours", "slot_step_min", "booking_rules", "contacts", "tg_notifications"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid setting key")
     if not isinstance(payload.value_jsonb, dict):
@@ -553,7 +551,7 @@ async def list_booking_slots(service_id: int, date: str, master_id: int | None =
 
 
 @router.post("/bookings", response_model=BookingOut)
-async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
+async def create_booking(payload: BookingAdminCreate, request: Request, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin)):
     requested_start = datetime.combine(payload.date, payload.time, tzinfo=timezone.utc)
     chosen = await resolve_available_slot(db, payload.service_id, requested_start, datetime.now(timezone.utc), master_id=payload.master_id)
 
@@ -595,7 +593,7 @@ async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends
 
 
 @router.patch("/bookings/{booking_id}", response_model=BookingOut)
-async def update_booking(booking_id: int, payload: BookingUpdate, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin), request: Request | None = None):
+async def update_booking(booking_id: int, payload: BookingUpdate, request: Request, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin)):
     result = await db.execute(
         select(Booking)
         .where(Booking.id == booking_id)

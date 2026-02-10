@@ -42,7 +42,7 @@ def upgrade() -> None:
     if admins_table_exists:
         op.execute("UPDATE admins SET role = 'SYS_ADMIN' WHERE role = 'OWNER'")
 
-    adminrole_enum = sa.Enum("OWNER", "ADMIN", "SYS_ADMIN", name="adminrole", create_type=False)
+    adminrole_enum = postgresql.ENUM(name="adminrole", create_type=False)
 
     op.create_table(
         "audit_logs",

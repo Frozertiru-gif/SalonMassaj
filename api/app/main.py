@@ -1,13 +1,14 @@
 import asyncio
 import logging
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import admin, auth, public, telegram
 from app.core.config import settings
 from app.db import AsyncSessionLocal
-from app.services.telegram import TelegramError, get_updates
+from app.services.telegram import TelegramError, get_me, get_updates
 
 
 def _configure_logging() -> None:
@@ -41,10 +42,14 @@ app.include_router(telegram.router)
 async def _telegram_polling_loop() -> None:
     logger.info("Telegram polling worker started")
     offset: int | None = None
+    backoff_seconds = 1
     while True:
         try:
+            logger.info("polling: request sent offset=%s", offset)
             response = await get_updates(offset=offset, timeout=30, allowed_updates=["message", "callback_query"])
             updates = response.get("result") or []
+            logger.info("polling: got %s updates", len(updates))
+            backoff_seconds = 1
             for update in updates:
                 async with AsyncSessionLocal() as db:
                     async with db.begin():
@@ -55,12 +60,23 @@ async def _telegram_polling_loop() -> None:
         except asyncio.CancelledError:
             logger.info("Telegram polling worker stopped")
             raise
+        except httpx.ReadTimeout:
+            logger.info("polling: timeout (ok)")
+            continue
+        except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.HTTPError) as exc:
+            logger.warning("polling: network error (retry in %ss): %s", backoff_seconds, exc)
+            await asyncio.sleep(backoff_seconds)
+            backoff_seconds = min(backoff_seconds * 2, 30)
+            continue
         except TelegramError:
-            logger.exception("Telegram polling failed due to Telegram API error")
-            await asyncio.sleep(2)
+            logger.warning("polling: Telegram API error (retry in %ss)", backoff_seconds, exc_info=True)
+            await asyncio.sleep(backoff_seconds)
+            backoff_seconds = min(backoff_seconds * 2, 30)
+            continue
         except Exception:  # noqa: BLE001
-            logger.exception("Telegram polling loop failed")
+            logger.exception("polling: unexpected error (retry in 2s)")
             await asyncio.sleep(2)
+            continue
 
 
 @app.on_event("startup")
@@ -70,6 +86,12 @@ async def startup_event() -> None:
 
     if not settings.telegram_bot_token:
         logger.error("TELEGRAM_BOT_TOKEN is not configured; Telegram handlers are disabled")
+    else:
+        try:
+            await get_me(timeout_seconds=10.0)
+            logger.info("Telegram startup check: getMe success")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Telegram startup check: getMe failed (%s)", exc)
 
     if mode == "polling":
         app.state.telegram_polling_task = asyncio.create_task(_telegram_polling_loop())

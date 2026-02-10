@@ -81,16 +81,26 @@ def build_admin_inline_keyboard(booking_id: int) -> dict[str, Any]:
     }
 
 
-async def _telegram_api(method: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _build_telegram_timeout(method: str, payload: dict[str, Any], timeout_override: httpx.Timeout | None = None) -> httpx.Timeout:
+    if timeout_override is not None:
+        return timeout_override
+
+    payload_timeout = float(payload.get("timeout") or 0)
+    read_timeout = max(60.0, payload_timeout + 10.0)
+    return httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=10.0)
+
+
+async def _telegram_api(method: str, payload: dict[str, Any], timeout_override: httpx.Timeout | None = None) -> dict[str, Any]:
     token = settings.telegram_bot_token
     if not token:
         raise TelegramError("TELEGRAM_BOT_TOKEN is not set")
 
-    async with httpx.AsyncClient() as client:
+    timeout = _build_telegram_timeout(method=method, payload=payload, timeout_override=timeout_override)
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
             f"https://api.telegram.org/bot{token}/{method}",
             json=payload,
-            timeout=10,
         )
 
     short_text = _short_response_text(response.text)
@@ -110,6 +120,11 @@ async def _telegram_api(method: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 async def get_webhook_info() -> dict[str, Any]:
     return await _telegram_api("getWebhookInfo", {})
+
+
+async def get_me(timeout_seconds: float = 10.0) -> dict[str, Any]:
+    timeout = httpx.Timeout(connect=timeout_seconds, read=timeout_seconds, write=10.0, pool=10.0)
+    return await _telegram_api("getMe", {}, timeout_override=timeout)
 
 
 async def set_webhook(url: str, secret_token: str, allowed_updates: list[str] | None = None) -> dict[str, Any]:

@@ -9,7 +9,7 @@ import { Section } from "@/components/Section";
 import { ServiceCard } from "@/components/ServiceCard";
 import { ReviewCard } from "@/components/ReviewCard";
 import { WeeklyRitualCarousel } from "@/components/WeeklyRitualCarousel";
-import type { AvailabilitySlot, Review, Service, WeeklyRitual } from "@/lib/types";
+import type { BookingSlot, Review, Service, WeeklyRitual } from "@/lib/types";
 
 const slimfoxHighlights = [
   {
@@ -68,7 +68,8 @@ export default function HomePage() {
   const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [selectedSlot, setSelectedSlot] = useState<string>("");
-  const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
+  const [slots, setSlots] = useState<BookingSlot[]>([]);
+  const [slotsLoaded, setSlotsLoaded] = useState(false);
   const [formSent, setFormSent] = useState(false);
 
   const servicesPreview = useMemo(() => services.slice(0, 12), [services]);
@@ -152,21 +153,26 @@ export default function HomePage() {
     const fetchSlots = async () => {
       if (!selectedServiceId || !selectedDate) {
         setSlots([]);
+        setSlotsLoaded(false);
         return;
       }
       setSelectedSlot("");
+      setSlotsLoaded(false);
       try {
         const response = await fetch(
-          `/api/public/availability?service_id=${selectedServiceId}&date=${selectedDate}`
+          `/api/public/bookings/slots?service_id=${selectedServiceId}&date=${selectedDate}`
         );
         if (!response.ok) {
           setSlots([]);
+          setSlotsLoaded(true);
           return;
         }
-        const data = (await response.json()) as { slots: AvailabilitySlot[] };
-        setSlots(data.slots);
+        const data = (await response.json()) as BookingSlot[];
+        setSlots(data);
+        setSlotsLoaded(true);
       } catch (error) {
         setSlots([]);
+        setSlotsLoaded(true);
       }
     };
     fetchSlots();
@@ -446,6 +452,11 @@ export default function HomePage() {
                     </option>
                   ))}
                 </select>
+              {selectedServiceId && selectedDate && slotsLoaded && slots.length === 0 ? (
+                <p className="mt-2 text-xs text-rose-600">
+                  Нет доступного времени на выбранную дату. Выберите другую дату.
+                </p>
+              ) : null}
               </div>
               <div>
                 <label className="text-xs font-medium text-ink-700">Комментарий</label>

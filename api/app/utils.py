@@ -15,6 +15,19 @@ DAY_MAP = {
     6: "sun",
 }
 
+DEFAULT_BUSINESS_HOURS = {
+    "mon": [{"start": "10:00", "end": "21:00"}],
+    "tue": [{"start": "10:00", "end": "21:00"}],
+    "wed": [{"start": "10:00", "end": "21:00"}],
+    "thu": [{"start": "10:00", "end": "21:00"}],
+    "fri": [{"start": "10:00", "end": "21:00"}],
+    "sat": [{"start": "10:00", "end": "21:00"}],
+    "sun": [{"start": "10:00", "end": "21:00"}],
+}
+
+DEFAULT_SLOT_STEP_MIN = 30
+DEFAULT_BOOKING_RULES = {"min_lead_min": 0, "max_days_ahead": 60}
+
 
 async def get_setting(db: AsyncSession, key: str) -> dict:
     result = await db.execute(select(Setting).where(Setting.key == key))
@@ -37,15 +50,24 @@ async def get_availability_slots(
     if not service:
         return []
 
-    business_hours = await get_setting(db, "business_hours")
-    slot_step_min = await get_setting(db, "slot_step_min")
-    booking_rules = await get_setting(db, "booking_rules")
+    business_hours_setting = await get_setting(db, "business_hours")
+    slot_step_min_setting = await get_setting(db, "slot_step_min")
+    booking_rules_setting = await get_setting(db, "booking_rules")
+
+    business_hours = business_hours_setting if isinstance(business_hours_setting, dict) and business_hours_setting else DEFAULT_BUSINESS_HOURS
 
     day_key = DAY_MAP[target_date.weekday()]
     ranges = business_hours.get(day_key, [])
-    step = int(slot_step_min.get("value", 30)) if isinstance(slot_step_min, dict) else int(slot_step_min or 30)
-    min_lead = int(booking_rules.get("min_lead_min", 0))
-    max_days = int(booking_rules.get("max_days_ahead", 60))
+    if not ranges:
+        ranges = DEFAULT_BUSINESS_HOURS.get(day_key, [])
+    step = (
+        int(slot_step_min_setting.get("value", DEFAULT_SLOT_STEP_MIN))
+        if isinstance(slot_step_min_setting, dict)
+        else int(slot_step_min_setting or DEFAULT_SLOT_STEP_MIN)
+    )
+    booking_rules = booking_rules_setting if isinstance(booking_rules_setting, dict) else DEFAULT_BOOKING_RULES
+    min_lead = int(booking_rules.get("min_lead_min", DEFAULT_BOOKING_RULES["min_lead_min"]))
+    max_days = int(booking_rules.get("max_days_ahead", DEFAULT_BOOKING_RULES["max_days_ahead"]))
 
     if target_date > (now.date() + timedelta(days=max_days)):
         return []
@@ -70,7 +92,6 @@ async def get_availability_slots(
 
     result = await db.execute(
         select(Booking).where(
-            Booking.service_id == service_id,
             Booking.status.in_([BookingStatus.new, BookingStatus.confirmed]),
             Booking.starts_at < slots[-1][1],
             Booking.ends_at > slots[0][0],

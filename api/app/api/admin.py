@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -9,8 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_admin
 from app.db import get_db
 from app.models import Booking, BookingStatus, Notification, Review, Service, ServiceCategory, Setting, WeeklyRitual
+from app.utils import get_availability_slots
 from app.schemas import (
+    BookingAdminCreate,
     BookingOut,
+    BookingSlotOut,
     BookingUpdate,
     NotificationOut,
     ReviewCreate,
@@ -372,6 +376,46 @@ async def list_bookings(
         query = query.where(Booking.is_read.is_(True))
     result = await db.execute(query)
     return result.scalars().all()
+
+
+@router.get("/bookings/slots", response_model=list[BookingSlotOut])
+async def list_booking_slots(service_id: int, date: str, db: AsyncSession = Depends(get_db)):
+    try:
+        target_date = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid date format") from exc
+    slots = await get_availability_slots(db, service_id, target_date, datetime.now(timezone.utc))
+    return [{"time": slot[0].strftime("%H:%M"), "starts_at": slot[0], "ends_at": slot[1]} for slot in slots]
+
+
+@router.post("/bookings", response_model=BookingOut)
+async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends(get_db)):
+    requested_start = datetime.combine(payload.date, payload.time, tzinfo=timezone.utc)
+    slots = await get_availability_slots(db, payload.service_id, payload.date, datetime.now(timezone.utc))
+    chosen = next((slot for slot in slots if slot[0] == requested_start), None)
+    if not chosen:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="slot is busy")
+
+    try:
+        booking_status = BookingStatus(payload.status)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status") from exc
+
+    booking = Booking(
+        client_name=payload.client_name or payload.client_phone,
+        client_phone=payload.client_phone,
+        service_id=payload.service_id,
+        starts_at=chosen[0],
+        ends_at=chosen[1],
+        comment=payload.comment,
+        status=booking_status,
+        source="ADMIN",
+        is_read=True,
+    )
+    db.add(booking)
+    await db.commit()
+    await db.refresh(booking)
+    return booking
 
 
 @router.patch("/bookings/{booking_id}", response_model=BookingOut)

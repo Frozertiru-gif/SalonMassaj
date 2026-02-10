@@ -1,7 +1,7 @@
 """add sys admin role and audit logs
 
-Revision ID: 0006_sys_admin_and_audit_logs
-Revises: 0005_master_telegram_link
+Revision ID: 0006
+Revises: 0005
 Create Date: 2026-02-10 00:00:00.000000
 """
 
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = "0006_sys_admin_and_audit_logs"
-down_revision = "0005_master_telegram_link"
+revision = "0006"
+down_revision = "0005"
 branch_labels = None
 depends_on = None
 

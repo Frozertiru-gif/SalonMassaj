@@ -14,8 +14,12 @@ async function updateAction(formData: FormData) {
 const settingKeys = ["business_hours", "slot_step_min", "booking_rules", "contacts", "tg_notifications"];
 
 export default async function AdminSettingsPage() {
+  type AdminSettingResponse = {
+  value_jsonb: Record<string, unknown>;
+};
+
   const settings = await Promise.all(
-    settingKeys.map(async (key) => ({ key, data: await adminFetch(`/admin/settings/${key}`) }))
+    settingKeys.map(async (key) => ({ key, data: await adminFetch<AdminSettingResponse>(`/admin/settings/${key}`) }))
   );
 
   return (

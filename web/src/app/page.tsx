@@ -1,15 +1,19 @@
-"use client";
-
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
+import { Suspense } from "react";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { Container } from "@/components/Container";
+import { HomeBookingForm } from "@/components/HomeBookingForm";
+import { ReviewCard } from "@/components/ReviewCard";
 import { Section } from "@/components/Section";
 import { ServiceCard } from "@/components/ServiceCard";
-import { ReviewCard } from "@/components/ReviewCard";
-import { WeeklyRitualCarousel } from "@/components/WeeklyRitualCarousel";
-import type { BookingSlot, Review, Service, WeeklyRitual } from "@/lib/types";
+import { publicFetch } from "@/lib/api";
+import type { Review, Service, WeeklyRitual } from "@/lib/types";
+
+const WeeklyRitualCarousel = dynamic(
+  () => import("@/components/WeeklyRitualCarousel").then((mod) => mod.WeeklyRitualCarousel),
+  { loading: () => <RitualCarouselSkeleton /> }
+);
 
 const slimfoxHighlights = [
   {
@@ -57,154 +61,46 @@ const slimfoxHighlights = [
   }
 ];
 
-export default function HomePage() {
-  const searchParams = useSearchParams();
-  const initialService = searchParams.get("service") ?? "";
-  const [services, setServices] = useState<Service[]>([]);
-  const [weeklyRituals, setWeeklyRituals] = useState<WeeklyRitual[]>([]);
-  const [publicReviews, setPublicReviews] = useState<Review[]>([]);
-  const [contacts, setContacts] = useState({ phone: "+7 (999) 123-45-67", address: "Москва, ул. Пудровая, 12" });
-  const [selectedService, setSelectedService] = useState<string>(initialService);
-  const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>("");
-  const [selectedSlot, setSelectedSlot] = useState<string>("");
-  const [slots, setSlots] = useState<BookingSlot[]>([]);
-  const [slotsLoaded, setSlotsLoaded] = useState(false);
-  const [formSent, setFormSent] = useState(false);
+function RitualCarouselSkeleton() {
+  return (
+    <div className="space-y-4" aria-hidden="true">
+      <div className="h-4 w-32 rounded bg-blush-100" />
+      <div className="h-8 w-3/4 rounded bg-blush-100" />
+      <div className="h-20 rounded bg-blush-50" />
+      <div className="h-10 w-32 rounded bg-blush-100" />
+    </div>
+  );
+}
 
-  const servicesPreview = useMemo(() => services.slice(0, 12), [services]);
+async function loadHomeData() {
+  const [servicesData, contactsData, ritualsData, reviewsData] = await Promise.allSettled([
+    publicFetch<Service[]>("/public/services", { revalidate: 300 }),
+    publicFetch<{ value_jsonb: { phone?: string; address?: string } }>("/public/settings/contacts", { revalidate: 600 }),
+    publicFetch<WeeklyRitual[]>("/public/weekly-rituals", { revalidate: 300 }),
+    publicFetch<Review[]>("/public/reviews", { revalidate: 300 })
+  ]);
 
-  useEffect(() => {
-    const fetchServices = async () => {
-      try {
-        const response = await fetch("/api/public/services");
-        if (!response.ok) {
-          setServices([]);
-          return;
-        }
-        const data = (await response.json()) as unknown;
-        if (Array.isArray(data)) {
-          setServices(data as Service[]);
-        } else {
-          if (process.env.NODE_ENV !== "production") {
-            console.warn("Unexpected services response shape", data);
-          }
-          setServices([]);
-        }
-      } catch (error) {
-        setServices([]);
-      }
-    };
-    const fetchContacts = async () => {
-      try {
-        const response = await fetch("/api/public/settings/contacts");
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json()) as { value_jsonb: { phone?: string; address?: string } };
-        setContacts((prev) => ({
-          phone: data.value_jsonb.phone ?? prev.phone,
-          address: data.value_jsonb.address ?? prev.address
-        }));
-      } catch (error) {
-        return;
-      }
-    };
-    const fetchWeeklyRituals = async () => {
-      try {
-        const response = await fetch("/api/public/weekly-rituals");
-        if (!response.ok) {
-          setWeeklyRituals([]);
-          return;
-        }
-        const data = (await response.json()) as WeeklyRitual[];
-        setWeeklyRituals(data);
-      } catch (error) {
-        console.error("Failed to load weekly rituals", error);
-        setWeeklyRituals([]);
-      }
-    };
-    const fetchReviews = async () => {
-      try {
-        const response = await fetch("/api/public/reviews");
-        if (!response.ok) {
-          setPublicReviews([]);
-          return;
-        }
-        const data = (await response.json()) as Review[];
-        setPublicReviews(data);
-      } catch (error) {
-        console.error("Failed to load reviews", error);
-        setPublicReviews([]);
-      }
-    };
-    fetchServices();
-    fetchContacts();
-    fetchWeeklyRituals();
-    fetchReviews();
-  }, []);
+  const services = servicesData.status === "fulfilled" && Array.isArray(servicesData.value) ? servicesData.value : [];
+  const weeklyRituals = ritualsData.status === "fulfilled" && Array.isArray(ritualsData.value) ? ritualsData.value : [];
+  const publicReviews = reviewsData.status === "fulfilled" && Array.isArray(reviewsData.value) ? reviewsData.value : [];
 
-  useEffect(() => {
-    const match = services.find((service) => service.slug === selectedService);
-    setSelectedServiceId(match?.id ?? null);
-  }, [selectedService, services]);
-
-  useEffect(() => {
-    const fetchSlots = async () => {
-      if (!selectedServiceId || !selectedDate) {
-        setSlots([]);
-        setSlotsLoaded(false);
-        return;
-      }
-      setSelectedSlot("");
-      setSlotsLoaded(false);
-      try {
-        const response = await fetch(
-          `/api/public/bookings/slots?service_id=${selectedServiceId}&date=${selectedDate}`
-        );
-        if (!response.ok) {
-          setSlots([]);
-          setSlotsLoaded(true);
-          return;
-        }
-        const data = (await response.json()) as BookingSlot[];
-        setSlots(data);
-        setSlotsLoaded(true);
-      } catch (error) {
-        setSlots([]);
-        setSlotsLoaded(true);
-      }
-    };
-    fetchSlots();
-  }, [selectedServiceId, selectedDate]);
-
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!selectedServiceId || !selectedSlot) {
-      return;
-    }
-    const formData = new FormData(event.currentTarget);
-    const payload = {
-      client_name: formData.get("name"),
-      client_phone: formData.get("phone"),
-      service_id: selectedServiceId,
-      starts_at: selectedSlot,
-      comment: formData.get("comment")
-    };
-    try {
-      const response = await fetch("/api/public/bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (response.ok) {
-        setFormSent(true);
-        setTimeout(() => setFormSent(false), 4000);
-      }
-    } catch (error) {
-      return;
-    }
+  const contacts = {
+    phone:
+      contactsData.status === "fulfilled"
+        ? contactsData.value?.value_jsonb?.phone ?? "+7 (999) 123-45-67"
+        : "+7 (999) 123-45-67",
+    address:
+      contactsData.status === "fulfilled"
+        ? contactsData.value?.value_jsonb?.address ?? "Москва, ул. Пудровая, 12"
+        : "Москва, ул. Пудровая, 12"
   };
+
+  return { services, weeklyRituals, publicReviews, contacts };
+}
+
+export default async function HomePage() {
+  const { services, weeklyRituals, publicReviews, contacts } = await loadHomeData();
+  const servicesPreview = services.slice(0, 12);
 
   return (
     <div>
@@ -252,10 +148,12 @@ export default function HomePage() {
             </div>
           </div>
           {weeklyRituals.length > 0 ? (
-            <div className="relative">
+            <div className="relative min-h-[260px]">
               <div className="absolute -left-6 -top-6 h-full w-full rounded-3xl bg-gradient-to-br from-blush-100 via-peach-50 to-white" />
               <div className="relative rounded-3xl bg-white/85 p-8 shadow-card ring-1 ring-blush-100/70 backdrop-blur">
-                <WeeklyRitualCarousel rituals={weeklyRituals} />
+                <Suspense fallback={<RitualCarouselSkeleton />}>
+                  <WeeklyRitualCarousel rituals={weeklyRituals} />
+                </Suspense>
               </div>
             </div>
           ) : null}
@@ -325,12 +223,10 @@ export default function HomePage() {
               чтобы закрепить ощущение лёгкости и уверенности.
             </p>
           </div>
-          <div className="relative">
+          <div className="relative h-80">
             <div className="absolute -left-6 -top-6 h-full w-full rounded-3xl bg-gradient-to-br from-blush-200 via-blush-100 to-white" />
-            <div className="relative h-80 rounded-3xl bg-white/80 shadow-soft ring-1 ring-blush-100">
-              <div className="flex h-full items-center justify-center text-sm text-blush-500">
-                Фото салона (плейсхолдер)
-              </div>
+            <div className="relative h-full rounded-3xl bg-white/80 shadow-soft ring-1 ring-blush-100">
+              <div className="flex h-full items-center justify-center text-sm text-blush-500">Фото салона (плейсхолдер)</div>
             </div>
           </div>
         </Container>
@@ -356,16 +252,12 @@ export default function HomePage() {
         <Container className="grid items-center gap-8 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-4">
             <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Обращение</p>
-            <h2 className="text-3xl font-semibold text-ink-900">
-              Ты — не просто тело. Ты — стиль, характер, грация.
-            </h2>
+            <h2 className="text-3xl font-semibold text-ink-900">Ты — не просто тело. Ты — стиль, характер, грация.</h2>
             <p className="text-base text-ink-700">
-              Мы создаём бережные программы коррекции фигуры, которые подчёркивают твою индивидуальность и помогают
-              почувствовать себя уверенно. SlimFox — про уважение к телу, его ритму и твоей внутренней силе.
+              В SlimFox мы верим, что красота начинается с уважения к себе. Мы не обещаем быстрые чудеса — мы создаём
+              устойчивые изменения, которые ощущаются в теле, в осанке и в внутреннем состоянии.
             </p>
-          </div>
-          <div className="flex flex-col gap-4 rounded-3xl bg-white/80 p-8 shadow-card ring-1 ring-blush-100/70">
-            <p className="text-sm text-ink-700">
+            <p className="text-base text-ink-700">
               Начни путь к себе с мягкой консультации — мы обсудим цели, подберём формат и выстроим маршрут трансформации.
             </p>
             <Button href="#booking" className="w-fit">
@@ -393,89 +285,7 @@ export default function HomePage() {
             </div>
           </div>
           <Card>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="text-xs font-medium text-ink-700">Имя</label>
-                <input
-                  name="name"
-                  required
-                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
-                  placeholder="Ваше имя"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-ink-700">Телефон</label>
-                <input
-                  name="phone"
-                  required
-                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
-                  placeholder="+7 (___) ___-__-__"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-ink-700">Услуга</label>
-                <select
-                  value={selectedService}
-                  onChange={(event) => setSelectedService(event.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
-                >
-                  <option value="">Выберите услугу</option>
-                  {services.map((service) => (
-                    <option key={service.slug} value={service.slug}>
-                      {service.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-ink-700">Дата</label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(event) => setSelectedDate(event.target.value)}
-                  required
-                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-ink-700">Время</label>
-                <select
-                  value={selectedSlot}
-                  onChange={(event) => setSelectedSlot(event.target.value)}
-                  required
-                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
-                >
-                  <option value="">Выберите время</option>
-                  {slots.map((slot) => (
-                    <option key={slot.starts_at} value={slot.starts_at}>
-                      {new Date(slot.starts_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-                    </option>
-                  ))}
-                </select>
-              {selectedServiceId && selectedDate && slotsLoaded && slots.length === 0 ? (
-                <p className="mt-2 text-xs text-rose-600">
-                  Нет доступного времени на выбранную дату. Выберите другую дату.
-                </p>
-              ) : null}
-              </div>
-              <div>
-                <label className="text-xs font-medium text-ink-700">Комментарий</label>
-                <textarea
-                  name="comment"
-                  rows={3}
-                  className="mt-2 w-full rounded-2xl border border-blush-100 bg-white px-4 py-3 text-sm text-ink-900 outline-none transition focus:border-blush-300"
-                  placeholder="Любые пожелания"
-                />
-              </div>
-              <Button type="submit" className="w-full">
-                Отправить заявку
-              </Button>
-              {formSent ? (
-                <div className="rounded-2xl bg-blush-50 px-4 py-3 text-center text-xs text-blush-700">
-                  Запись принята, мы свяжемся с вами
-                </div>
-              ) : null}
-            </form>
+            <HomeBookingForm services={services} />
           </Card>
         </Container>
       </Section>

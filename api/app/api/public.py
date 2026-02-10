@@ -10,6 +10,7 @@ from app.db import get_db
 from app.models import Booking, BookingStatus, Notification, NotificationType, Review, Service, ServiceCategory, WeeklyRitual
 from app.schemas import AvailabilityOut, BookingCreate, BookingOut, BookingSlotOut, ReviewOut, ServiceCategoryOut, ServiceOut, WeeklyRitualOut
 from app.utils import get_availability_slots, get_setting
+from app.services.bookings import booking_validation_error, normalize_booking_start, resolve_available_slot
 from app.services.telegram import send_booking_notification
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -89,14 +90,12 @@ async def get_public_setting(key: str, db: AsyncSession = Depends(get_db)):
 @router.post("/bookings", response_model=BookingOut)
 async def create_booking(payload: BookingCreate, db: AsyncSession = Depends(get_db)):
     now = datetime.now(timezone.utc)
-    available = await get_availability_slots(db, payload.service_id, payload.starts_at.date(), now)
-    chosen = None
-    for slot in available:
-        if slot[0] == payload.starts_at:
-            chosen = slot
-            break
-    if not chosen:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Slot unavailable")
+    try:
+        requested_start = normalize_booking_start(payload.starts_at, payload.date, payload.time)
+    except ValueError as exc:
+        raise booking_validation_error(str(exc)) from exc
+
+    chosen = await resolve_available_slot(db, payload.service_id, requested_start, now)
 
     booking = Booking(
         client_name=payload.client_name,
@@ -108,8 +107,7 @@ async def create_booking(payload: BookingCreate, db: AsyncSession = Depends(get_
         status=BookingStatus.new,
     )
     db.add(booking)
-    await db.commit()
-    await db.refresh(booking)
+    await db.flush()
 
     notification = {
         "booking_id": booking.id,
@@ -120,8 +118,12 @@ async def create_booking(payload: BookingCreate, db: AsyncSession = Depends(get_
     }
 
     db.add(Notification(type=NotificationType.booking_created, payload=notification, is_read=False))
-    await db.commit()
 
     await send_booking_notification(db, notification)
 
-    return booking
+    result = await db.execute(
+        select(Booking)
+        .where(Booking.id == booking.id)
+        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category))
+    )
+    return result.scalar_one()

@@ -3,6 +3,7 @@ import { Container } from "@/components/Container";
 
 const navItems = [
   { label: "Услуги", href: "/services" },
+  { label: "Мастера", href: "/masters" },
   { label: "О нас", href: "/#about" },
   { label: "Отзывы", href: "/#reviews" },
   { label: "Запись", href: "/#booking" }

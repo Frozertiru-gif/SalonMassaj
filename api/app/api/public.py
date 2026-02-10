@@ -2,16 +2,26 @@ from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
-from sqlalchemy.sql import nullslast
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql import nullslast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.models import Booking, BookingStatus, Notification, NotificationType, Review, Service, ServiceCategory, WeeklyRitual
-from app.schemas import AvailabilityOut, BookingCreate, BookingOut, BookingSlotOut, ReviewOut, ServiceCategoryOut, ServiceOut, WeeklyRitualOut
-from app.utils import get_availability_slots, get_setting
+from app.models import Booking, BookingStatus, Master, Notification, NotificationType, Review, Service, ServiceCategory, WeeklyRitual
+from app.schemas import (
+    AvailabilityOut,
+    BookingCreate,
+    BookingOut,
+    BookingSlotOut,
+    MasterOut,
+    ReviewOut,
+    ServiceCategoryOut,
+    ServiceOut,
+    WeeklyRitualOut,
+)
 from app.services.bookings import booking_validation_error, normalize_booking_start, resolve_available_slot
 from app.services.telegram import send_booking_notification
+from app.utils import get_availability_slots, get_setting
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -34,6 +44,30 @@ async def get_service(slug: str, db: AsyncSession = Depends(get_db)):
     if not service:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     return service
+
+
+@router.get("/masters", response_model=list[MasterOut])
+async def list_masters(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Master)
+        .where(Master.is_active.is_(True))
+        .options(selectinload(Master.services).selectinload(Service.category))
+        .order_by(Master.sort_order, Master.name)
+    )
+    return result.scalars().all()
+
+
+@router.get("/masters/{slug}", response_model=MasterOut)
+async def get_master(slug: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Master)
+        .where(Master.slug == slug, Master.is_active.is_(True))
+        .options(selectinload(Master.services).selectinload(Service.category))
+    )
+    master = result.scalar_one_or_none()
+    if not master:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
+    return master
 
 
 @router.get("/categories", response_model=list[ServiceCategoryOut])
@@ -66,16 +100,16 @@ async def list_reviews(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/availability", response_model=AvailabilityOut)
-async def get_availability(service_id: int, date: date, db: AsyncSession = Depends(get_db)):
+async def get_availability(service_id: int, date: date, master_id: int | None = None, db: AsyncSession = Depends(get_db)):
     now = datetime.now(timezone.utc)
-    slots = await get_availability_slots(db, service_id, date, now)
+    slots = await get_availability_slots(db, service_id, date, now, master_id=master_id)
     return {"slots": [{"starts_at": slot[0], "ends_at": slot[1]} for slot in slots]}
 
 
 @router.get("/bookings/slots", response_model=list[BookingSlotOut])
-async def get_booking_slots(service_id: int, date: date, db: AsyncSession = Depends(get_db)):
+async def get_booking_slots(service_id: int, date: date, master_id: int | None = None, db: AsyncSession = Depends(get_db)):
     now = datetime.now(timezone.utc)
-    slots = await get_availability_slots(db, service_id, date, now)
+    slots = await get_availability_slots(db, service_id, date, now, master_id=master_id)
     return [{"time": slot[0].strftime("%H:%M"), "starts_at": slot[0], "ends_at": slot[1]} for slot in slots]
 
 
@@ -95,12 +129,13 @@ async def create_booking(payload: BookingCreate, db: AsyncSession = Depends(get_
     except ValueError as exc:
         raise booking_validation_error(str(exc)) from exc
 
-    chosen = await resolve_available_slot(db, payload.service_id, requested_start, now)
+    chosen = await resolve_available_slot(db, payload.service_id, requested_start, now, master_id=payload.master_id)
 
     booking = Booking(
         client_name=payload.client_name,
         client_phone=payload.client_phone,
         service_id=payload.service_id,
+        master_id=payload.master_id,
         starts_at=chosen[0],
         ends_at=chosen[1],
         comment=payload.comment,
@@ -112,6 +147,7 @@ async def create_booking(payload: BookingCreate, db: AsyncSession = Depends(get_
     notification = {
         "booking_id": booking.id,
         "service_id": booking.service_id,
+        "master_id": booking.master_id,
         "starts_at": booking.starts_at.isoformat(),
         "client_name": booking.client_name,
         "client_phone": booking.client_phone,
@@ -124,6 +160,10 @@ async def create_booking(payload: BookingCreate, db: AsyncSession = Depends(get_
     result = await db.execute(
         select(Booking)
         .where(Booking.id == booking.id)
-        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category))
+        .options(
+            selectinload(Booking.service),
+            selectinload(Booking.service).selectinload(Service.category),
+            selectinload(Booking.master).selectinload(Master.services),
+        )
     )
     return result.scalar_one()

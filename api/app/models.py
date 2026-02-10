@@ -1,7 +1,21 @@
 import enum
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Enum, ForeignKey, Index, Integer, String, Table, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -189,6 +203,7 @@ class Booking(Base):
     source: Mapped[str] = mapped_column(String(50), default="WEB")
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     admin_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     service: Mapped[Service] = relationship()
@@ -199,6 +214,7 @@ class Booking(Base):
         Index("ix_bookings_status", "status"),
         Index("ix_bookings_is_read", "is_read"),
         Index("ix_bookings_master_id", "master_id"),
+        CheckConstraint("final_price_cents IS NULL OR final_price_cents >= 0", name="ck_bookings_final_price_cents_non_negative"),
     )
 
 

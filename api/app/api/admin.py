@@ -488,6 +488,12 @@ async def create_booking(payload: BookingAdminCreate, db: AsyncSession = Depends
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status") from exc
 
+    if booking_status == BookingStatus.done:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="final_price is required when closing booking",
+        )
+
     booking = Booking(
         client_name=payload.client_name or payload.client_phone,
         client_phone=payload.client_phone,
@@ -527,6 +533,16 @@ async def update_booking(booking_id: int, payload: BookingUpdate, db: AsyncSessi
             updates["status"] = BookingStatus(updates["status"])
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status") from exc
+
+    target_status = updates.get("status", booking.status)
+    if target_status == BookingStatus.done:
+        final_price_cents = updates.get("final_price_cents", booking.final_price_cents)
+        if final_price_cents is None or final_price_cents <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="final_price is required when closing booking",
+            )
+
     if "master_id" in updates and updates["master_id"] is not None:
         master = (await db.execute(select(Master).where(Master.id == updates["master_id"]))).scalar_one_or_none()
         if not master or not master.is_active:

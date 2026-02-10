@@ -29,6 +29,10 @@ export async function generateMetadata({ params }: ServicePageProps): Promise<Me
 }
 
 export default async function ServicePage({ params }: ServicePageProps) {
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[services/[slug]] Matched slug: ${params.slug}`);
+  }
+
   let service: Service | null = null;
   try {
     const encodedSlug = encodeURIComponent(params.slug);

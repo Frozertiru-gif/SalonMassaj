@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     telegram_admin_ids: str | None = None
     telegram_sys_admin_ids: str | None = None
     telegram_mode: str = "webhook"
+    log_level: str = "INFO"
 
 
 settings = Settings()

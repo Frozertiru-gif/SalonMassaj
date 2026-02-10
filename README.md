@@ -95,6 +95,8 @@ npm run dev
 - `TELEGRAM_BOT_USERNAME`
 - `TELEGRAM_ADMIN_IDS`
 - `TELEGRAM_SYS_ADMIN_IDS`
+- `TELEGRAM_MODE` (`polling` для локального Docker, `webhook` для публичного HTTPS URL)
+- `LOG_LEVEL` (`INFO` для подробных логов Telegram)
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `SEED_ADMIN` (dev seed администратора)
 
@@ -143,3 +145,21 @@ Dev-вход:
 
 Сервер пишет события в таблицу `audit_logs` (не в браузер).
 Для просмотра используется endpoint `GET /admin/logs` (только `SYS_ADMIN`) и страница админки `/admin/logs`.
+
+
+## Telegram: почему «бот молчит» и в логах пусто
+
+Чаще всего причина в режиме `webhook` без публичного HTTPS webhook URL.
+В Docker Compose по умолчанию используется `TELEGRAM_MODE=polling`, поэтому бот сам забирает апдейты через `getUpdates` и должен работать локально без проброса webhook.
+
+Быстрая диагностика:
+
+```bash
+curl -s http://localhost:8000/admin/telegram/webhook-info
+```
+
+Проверьте:
+- `diagnostics.telegram_mode` — ожидаемо `polling` для локальной разработки
+- `diagnostics.token_configured` — должен быть `true`
+- если выбран `webhook`, должен быть валидный `current_webhook_url`
+

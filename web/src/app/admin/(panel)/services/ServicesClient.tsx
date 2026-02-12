@@ -1,24 +1,56 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { useFormState } from "react-dom";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
-import type { Service } from "@/lib/types";
+import { CollapsibleSection } from "@/components/admin/CollapsibleSection";
+import type { Service, ServiceCategory } from "@/lib/types";
 import { deleteService } from "../../actions";
+import { ServiceCreateForm } from "./new/ServiceCreateForm";
 
 type ServicesClientProps = {
   services: Service[];
+  categories: ServiceCategory[];
 };
 
 const initialState = { error: undefined, success: undefined };
 
-export function ServicesClient({ services }: ServicesClientProps) {
+export function ServicesClient({ services, categories }: ServicesClientProps) {
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const createSectionRef = useRef<HTMLDivElement | null>(null);
+
+  const handleOpenCreate = () => {
+    setIsCreateOpen(true);
+    createSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
-    <div className="space-y-3">
-      {services.map((service) => (
-        <ServiceRow key={service.id} service={service} />
-      ))}
-    </div>
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Услуги</p>
+          <h2 className="mt-2 text-2xl font-semibold text-ink-900">Каталог услуг</h2>
+        </div>
+        <Button type="button" variant="secondary" onClick={handleOpenCreate}>
+          Добавить
+        </Button>
+      </div>
+
+      <div ref={createSectionRef}>
+        <CollapsibleSection title="Добавить услугу" open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+          <div className="pt-2">
+            <ServiceCreateForm categories={categories} onSuccess={() => setIsCreateOpen(false)} />
+          </div>
+        </CollapsibleSection>
+      </div>
+
+      <div className="space-y-3">
+        {services.map((service) => (
+          <ServiceRow key={service.id} service={service} />
+        ))}
+      </div>
+    </>
   );
 }
 

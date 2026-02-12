@@ -1,9 +1,9 @@
 import { adminFetch } from "@/lib/api";
 import type { Booking, Master, Service } from "@/lib/types";
-import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { Container } from "@/components/Container";
 import { updateBookingAdmin } from "../../actions";
+import { BookingsCreateSection } from "./BookingsCreateSection";
 
 
 function formatPrice(cents?: number | null) {
@@ -67,15 +67,7 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
 
   return (
     <Container className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Записи</p>
-          <h2 className="mt-2 text-2xl font-semibold text-ink-900">Управление заявками</h2>
-        </div>
-        <Button href="/admin/bookings/new" variant="secondary">
-          Добавить
-        </Button>
-      </div>
+      <BookingsCreateSection services={services} />
 
       <Card className="space-y-3">
         <div className="flex flex-wrap gap-2">

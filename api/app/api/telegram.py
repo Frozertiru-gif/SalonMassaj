@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.db import get_db
 from app.models import AdminRole, AuditActorType, Booking, BookingStatus, Master
-from app.services.access import get_telegram_admin_ids, resolve_telegram_role
+from app.services.access import resolve_telegram_role
 from app.services.audit import log_event
 from app.services.telegram import (
     answer_callback_query,
@@ -27,7 +27,29 @@ from app.services.telegram import (
 router = APIRouter(tags=["telegram"])
 logger = logging.getLogger(__name__)
 
-ADMIN_MENU = "Выберите действие:\n• Новые записи\n• Ожидают подтверждения\n• Мастера\n• Помощь"
+ADMIN_MENU = "Выберите действие (нажмите кнопку ниже):\n• Новые записи\n• Ожидают подтверждения\n• Мастера\n• Помощь"
+
+ADMIN_ACTION_ALIASES: dict[str, set[str]] = {
+    "new": {"новые записи", "новые"},
+    "pending": {"ожидают подтверждения", "ожидают", "ожидание"},
+    "masters": {"мастера", "мастеры", "мастера список"},
+    "help": {"помощь", "help", "/help"},
+}
+
+
+def _admin_reply_keyboard() -> dict[str, Any]:
+    return {
+        "keyboard": [
+            [{"text": "Новые записи"}, {"text": "Ожидают подтверждения"}],
+            [{"text": "Мастера"}, {"text": "Помощь"}],
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False,
+    }
+
+
+def _normalize_action_text(text: str) -> str:
+    return " ".join(text.lower().split())
 
 
 def _extract_from_id(update: dict[str, Any]) -> int | None:
@@ -160,7 +182,7 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
 
     chat_id = (message.get("chat") or {}).get("id")
     role = await resolve_telegram_role(db, int(telegram_user_id))
-    admin_ids = await get_telegram_admin_ids(db)
+    has_admin_access = role in {AdminRole.admin, AdminRole.sys_admin}
 
     if text in {"/admin", "/sys"}:
         if text == "/sys" and role != AdminRole.sys_admin:
@@ -169,7 +191,11 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
         if role not in {AdminRole.admin, AdminRole.sys_admin}:
             await send_message(chat_id=telegram_user_id, text="⛔️ Доступ запрещен")
             return
-        await send_message(chat_id=telegram_user_id, text=f"✅ Доступ разрешен. Ваша роль: {role.value}")
+        await send_message(
+            chat_id=telegram_user_id,
+            text=f"✅ Доступ разрешен. Ваша роль: {role.value}\n\n{ADMIN_MENU}",
+            reply_markup=_admin_reply_keyboard(),
+        )
         return
 
     if text.startswith("/start"):
@@ -194,32 +220,36 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
             else:
                 await send_message(chat_id=telegram_user_id, text="Код привязки не найден или устарел.")
 
-        if linked_master and int(telegram_user_id) not in admin_ids:
+        if linked_master and not has_admin_access:
             await send_message(chat_id=telegram_user_id, text="OK, бот жив")
             return
 
-        if int(telegram_user_id) not in admin_ids:
+        if not has_admin_access:
             logger.info("tg_admin denied user_id=%s", telegram_user_id)
             await send_message(chat_id=telegram_user_id, text="Нет доступа")
             return
 
-        await send_message(chat_id=telegram_user_id, text=ADMIN_MENU)
+        await send_message(chat_id=telegram_user_id, text=ADMIN_MENU, reply_markup=_admin_reply_keyboard())
         return
 
-    if int(telegram_user_id) not in admin_ids:
+    if not has_admin_access:
         logger.info("tg_admin denied user_id=%s", telegram_user_id)
         return
 
-    if text == "Новые записи":
+    normalized_text = _normalize_action_text(text)
+
+    if normalized_text in ADMIN_ACTION_ALIASES["new"]:
         await _send_admin_booking_list(db, int(chat_id), "new")
-    elif text == "Ожидают подтверждения":
+    elif normalized_text in ADMIN_ACTION_ALIASES["pending"]:
         await _send_admin_booking_list(db, int(chat_id), "pending")
-    elif text == "Мастера":
+    elif normalized_text in ADMIN_ACTION_ALIASES["masters"]:
         masters = (await db.execute(select(Master).where(Master.is_active.is_(True)).order_by(Master.sort_order, Master.name))).scalars().all()
         text_rows = [f"• {m.name} (id={m.id})" for m in masters] or ["Активные мастера не найдены."]
         await send_message(chat_id=int(chat_id), text="\n".join(text_rows))
-    elif text == "Помощь":
-        await send_message(chat_id=int(chat_id), text="Используйте кнопки: Новые записи / Ожидают подтверждения / Мастера")
+    elif normalized_text in ADMIN_ACTION_ALIASES["help"]:
+        await send_message(chat_id=int(chat_id), text="Используйте кнопки: Новые записи / Ожидают подтверждения / Мастера", reply_markup=_admin_reply_keyboard())
+    else:
+        await send_message(chat_id=int(chat_id), text="Не понял команду. Выберите действие кнопкой ниже.", reply_markup=_admin_reply_keyboard())
 
 
 async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> None:

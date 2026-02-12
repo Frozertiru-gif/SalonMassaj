@@ -59,6 +59,8 @@ export type Master = {
   is_active: boolean;
   sort_order: number;
   telegram_user_id?: number | null;
+  telegram_chat_id?: number | null;
+  telegram_username?: string | null;
   telegram_link_code?: string | null;
   telegram_linked_at?: string | null;
   services?: Service[];

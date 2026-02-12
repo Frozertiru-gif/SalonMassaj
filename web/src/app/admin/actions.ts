@@ -79,11 +79,13 @@ export async function updateSetting(key: string, value_jsonb: object) {
 }
 
 export async function saveTelegramNotifications(_prevState: AdminFormState, formData: FormData): Promise<AdminFormState> {
-    const payload = {
+  const payload = {
     enabled: formData.get("enabled") === "on",
     admin_chat_id: (formData.get("admin_chat_id") as string | null) || null,
-    admin_thread_id: formData.get("admin_thread_id") ? Number(formData.get("admin_thread_id")) : null,
-    template_admin: (formData.get("template_admin") as string | null) || "",
+    thread_id: formData.get("thread_id") ? Number(formData.get("thread_id")) : null,
+    template_booking_created: (formData.get("template_booking_created") as string | null) || null,
+    template_booking_confirmed_admin: (formData.get("template_booking_confirmed_admin") as string | null) || null,
+    template_booking_assigned_master: (formData.get("template_booking_assigned_master") as string | null) || null,
     send_inline_actions: formData.get("send_inline_actions") === "on",
     public_webhook_base_url: (formData.get("public_webhook_base_url") as string | null) || null,
     webhook_secret: (formData.get("webhook_secret") as string | null) || null

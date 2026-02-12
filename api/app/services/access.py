@@ -9,15 +9,20 @@ from app.models import AdminRole
 from app.utils import get_setting
 
 
+def _extract_ids(raw: object) -> Iterable[int | str]:
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        if isinstance(raw.get("user_ids"), list):
+            return raw["user_ids"]
+        if isinstance(raw.get("ids"), list):
+            return raw["ids"]
+    return []
+
+
 async def _load_ids_from_setting(db: AsyncSession, key: str) -> set[int]:
     raw = await get_setting(db, key)
-    values: Iterable[int | str]
-    if isinstance(raw, list):
-        values = raw
-    elif isinstance(raw, dict) and isinstance(raw.get("ids"), list):
-        values = raw["ids"]
-    else:
-        return set()
+    values = _extract_ids(raw)
 
     parsed: set[int] = set()
     for value in values:
@@ -47,6 +52,10 @@ async def get_telegram_admin_ids(db: AsyncSession) -> set[int]:
     env_ids = _parse_ids(settings.telegram_admin_ids)
     if env_ids:
         return env_ids
+
+    from_new_setting = await _load_ids_from_setting(db, "tg_admins")
+    if from_new_setting:
+        return from_new_setting
     return await _load_ids_from_setting(db, "tg_admin_ids")
 
 

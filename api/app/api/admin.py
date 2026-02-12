@@ -123,9 +123,16 @@ def _request_context(request: Request) -> tuple[str | None, str | None]:
     return request.client.host if request.client else None, request.headers.get("user-agent")
 
 
+def _service_with_category_query():
+    # We centralize eager-loading of Service.category because ServiceOut includes
+    # nested category data. Returning ORM objects without this option can trigger
+    # async lazy-load attempts during FastAPI response serialization.
+    return select(Service).options(selectinload(Service.category))
+
+
 @router.get("/services", response_model=list[ServiceOut])
 async def list_services(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Service).options(selectinload(Service.category)).order_by(Service.sort_order, Service.title))
+    result = await db.execute(_service_with_category_query().order_by(Service.sort_order, Service.title))
     return result.scalars().all()
 
 
@@ -142,7 +149,7 @@ async def create_service(payload: ServiceCreate, request: Request, db: AsyncSess
         service = Service(**payload_data)
         db.add(service)
         await db.flush()
-        result = await db.execute(select(Service).options(selectinload(Service.category)).where(Service.id == service.id))
+        result = await db.execute(_service_with_category_query().where(Service.id == service.id))
         service_out = ServiceOut.model_validate(result.scalar_one())
     except IntegrityError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists") from exc
@@ -171,7 +178,8 @@ async def update_service(service_id: int, payload: ServiceUpdate, request: Reque
         await db.flush()
     except IntegrityError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists") from exc
-    await db.refresh(service)
+    result = await db.execute(_service_with_category_query().where(Service.id == service.id))
+    service = result.scalar_one()
     ip, user_agent = _request_context(request)
     await log_event(db, actor_type=AuditActorType.web, actor_admin=admin, action="service.update", entity_type="service", entity_id=service.id, meta={"fields": list(updates.keys())}, ip=ip, user_agent=user_agent)
     return service

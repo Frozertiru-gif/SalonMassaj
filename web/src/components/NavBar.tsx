@@ -11,7 +11,7 @@ const navItems = [
 
 export function NavBar() {
   return (
-    <header className="fixed top-0 z-50 w-full overflow-hidden border-b border-blush-100 bg-[url('/images/banner.svg')] bg-cover bg-center bg-no-repeat backdrop-blur-md before:absolute before:inset-0 before:z-0 before:bg-white/65 before:content-['']">
+    <header className="fixed top-0 z-50 w-full overflow-hidden bg-[url('/images/banner.svg')] bg-cover bg-center bg-no-repeat backdrop-blur-md before:absolute before:inset-0 before:z-0 before:bg-white/65 before:content-['']">
       <Container className="relative z-10 flex h-20 items-center justify-between">
         <Link href="/" className="flex items-center gap-2 text-lg font-semibold text-ink-900">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blush-100 text-blush-600">

@@ -209,6 +209,7 @@ class Booking(Base):
     source: Mapped[str] = mapped_column(String(50), default="WEB")
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     admin_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tg_new_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     final_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

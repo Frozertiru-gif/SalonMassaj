@@ -240,11 +240,15 @@ async def send_booking_created_to_admin(db: AsyncSession, booking_id: int) -> No
         await db.execute(
             select(Booking)
             .where(Booking.id == booking_id)
+            .with_for_update()
             .options(selectinload(Booking.service), selectinload(Booking.master))
         )
     ).scalar_one_or_none()
     if not booking:
         logger.warning("tg_notify.booking_created skip reason=booking_not_found booking_id=%s", booking_id)
+        return
+    if booking.tg_new_sent_at is not None:
+        logger.info("tg_notify.booking_created skip reason=already_sent booking_id=%s tg_new_sent_at=%s", booking_id, booking.tg_new_sent_at.isoformat())
         return
 
     payload = await build_booking_notification_payload(db, booking)
@@ -270,6 +274,8 @@ async def send_booking_created_to_admin(db: AsyncSession, booking_id: int) -> No
         return
 
     message_id = ((result or {}).get("result") or {}).get("message_id")
+    booking.tg_new_sent_at = datetime.now(timezone.utc)
+    await db.flush()
     logger.info("tg_notify.booking_created sent booking_id=%s message_id=%s", booking_id, message_id)
 
 

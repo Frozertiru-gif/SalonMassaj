@@ -127,6 +127,10 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
                 <p className="text-xs text-ink-500">Фактическая стоимость</p>
               </div>
             </div>
+            <div className="rounded-2xl border border-blush-100 bg-blush-50/40 px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-500">Комментарий клиента</p>
+              <p className="mt-1 text-sm text-ink-900">{booking.comment?.trim() ? booking.comment : "—"}</p>
+            </div>
             <form action={updateAction} className="grid gap-2 md:grid-cols-4">
               <input type="hidden" name="id" value={booking.id} />
               <select name="status" defaultValue={booking.status} className="rounded-full border border-blush-100 px-3 py-2 text-sm">

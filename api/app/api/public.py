@@ -171,6 +171,7 @@ async def create_booking(payload: BookingCreate, db: AsyncSession = Depends(get_
 
     db.add(Notification(type=NotificationType.booking_created, payload=notification, is_read=False))
 
+    logger.info("booking.create completed booking_id=%s source=public", booking.id)
     await send_booking_created_to_admin(db, booking.id)
 
     return booking_full

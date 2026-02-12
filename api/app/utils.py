@@ -35,6 +35,18 @@ async def get_setting(db: AsyncSession, key: str) -> dict:
     return setting.value_jsonb if setting else {}
 
 
+def parse_date_param(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        pass
+
+    try:
+        return datetime.strptime(value, "%d.%m.%Y").date()
+    except ValueError as exc:
+        raise ValueError("Invalid date format. Use YYYY-MM-DD or DD.MM.YYYY.") from exc
+
+
 def parse_time(value: str) -> time:
     return datetime.strptime(value, "%H:%M").time()
 

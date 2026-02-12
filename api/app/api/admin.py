@@ -1,3 +1,4 @@
+import logging
 import re
 import secrets
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from app.services.telegram import (
     send_message,
     set_webhook,
 )
-from app.utils import get_availability_slots
+from app.utils import get_availability_slots, parse_date_param
 from app.schemas import (
     AuditLogOut,
     BookingAdminCreate,
@@ -54,6 +55,7 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
+logger = logging.getLogger(__name__)
 
 
 CYRILLIC_TRANSLIT = {
@@ -623,9 +625,10 @@ async def list_bookings(
 @router.get("/bookings/slots", response_model=list[BookingSlotOut])
 async def list_booking_slots(service_id: int, date: str, master_id: int | None = None, db: AsyncSession = Depends(get_db)):
     try:
-        target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        target_date = parse_date_param(date)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid date format") from exc
+        logger.warning("Invalid date in admin booking slots request: %s", date)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     slots = await get_availability_slots(db, service_id, target_date, datetime.now(timezone.utc), master_id=master_id)
     return [{"time": slot[0].strftime("%H:%M"), "starts_at": slot[0], "ends_at": slot[1]} for slot in slots]
 

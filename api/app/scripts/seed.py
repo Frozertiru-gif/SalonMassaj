@@ -30,7 +30,7 @@ DEFAULT_SETTINGS = {
         "enabled": False,
         "admin_chat_id": None,
         "thread_id": None,
-        "template_booking_created": "Новая запись #{booking_id}: {client_name} ({client_phone_masked})\nУслуга: {service_title}\nВремя: {starts_at_human}",
+        "template_booking_created": "Новая запись #{booking_id}: {client_name} ({client_phone})\nУслуга: {service_title}\nВремя: {starts_at_human}",
         "template_booking_confirmed_admin": "✅ Запись #{booking_id} подтверждена. Мастер: {master_name}.",
         "template_booking_assigned_master": "📌 Новая подтверждённая запись\nДата и время: {starts_at_human}\nУслуга: {service_title}\nКлиент: {client_name} ({client_phone_masked})\nКомментарий: {comment}",
         "send_inline_actions": True,

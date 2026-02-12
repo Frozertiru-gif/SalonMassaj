@@ -103,7 +103,8 @@ def _admin_update_text(booking: Booking, action_text: str, actor_name: str | Non
             "starts_at": booking.starts_at.isoformat(),
             "starts_at_human": booking.starts_at.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC"),
             "status": booking.status.value,
-        }
+        },
+        mask_client_phone=False,
     ) + actor_suffix
 
 

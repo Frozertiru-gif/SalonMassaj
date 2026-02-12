@@ -95,7 +95,10 @@ export default async function AdminMastersPage() {
                 <p className="text-xs text-ink-600">Chat ID: {master.telegram_chat_id ?? "—"}</p>
                 <p className="text-xs text-ink-600">Username: {master.telegram_username ?? "—"}</p>
                 {master.telegram_link_code ? (
-                  <p className="text-xs text-ink-600">Код привязки: <span className="font-mono">{master.telegram_link_code}</span></p>
+                  <div className="text-xs text-ink-600">
+                    <p>Код привязки: <span className="font-mono">{master.telegram_link_code}</span></p>
+                    <p className="mt-1">Попросите мастера открыть бота и отправить команду <span className="font-mono">/start {master.telegram_link_code}</span></p>
+                  </div>
                 ) : null}
                 <form action={updateTelegramUser} className="mt-2 flex items-center gap-2">
                   <input type="hidden" name="id" value={master.id} />

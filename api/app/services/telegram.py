@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ADMIN_TEMPLATE = (
     "🆕 Новая запись #{booking_id}\n"
-    "Клиент: {client_name} ({client_phone_masked})\n"
+    "Клиент: {client_name} ({client_phone})\n"
     "Услуга: {service_title}\n"
     "Дата и время: {starts_at_human}\n"
     "Мастер: {master_name}\n"
@@ -71,13 +71,13 @@ def booking_time_human(starts_at: datetime) -> str:
     return normalized.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
 
 
-def booking_admin_text(payload: dict[str, Any], template: str | None = None) -> str:
+def booking_admin_text(payload: dict[str, Any], template: str | None = None, *, mask_client_phone: bool = True) -> str:
     text_template = template or DEFAULT_ADMIN_TEMPLATE
     base_payload = {
         "booking_id": payload.get("booking_id") or "—",
         "client_name": payload.get("client_name") or "—",
         "client_phone": payload.get("client_phone") or "—",
-        "client_phone_masked": mask_phone(payload.get("client_phone")),
+        "client_phone_masked": mask_phone(payload.get("client_phone")) if mask_client_phone else (payload.get("client_phone") or "—"),
         "service_title": payload.get("service_title") or f"ID {payload.get('service_id')}",
         "starts_at": payload.get("starts_at") or "—",
         "starts_at_human": payload.get("starts_at_human") or payload.get("starts_at") or "—",
@@ -249,7 +249,11 @@ async def send_booking_created_to_admin(db: AsyncSession, booking_id: int) -> No
         return
 
     payload = await build_booking_notification_payload(db, booking)
-    text = booking_admin_text(payload, template=tg_settings.template_booking_created or tg_settings.template_admin)
+    text = booking_admin_text(
+        payload,
+        template=tg_settings.template_booking_created or tg_settings.template_admin,
+        mask_client_phone=False,
+    )
     reply_markup = build_admin_inline_keyboard(booking.id) if tg_settings.send_inline_actions else None
 
     try:

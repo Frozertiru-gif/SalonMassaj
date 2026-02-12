@@ -1,9 +1,10 @@
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -28,6 +29,8 @@ router = APIRouter(tags=["telegram"])
 logger = logging.getLogger(__name__)
 
 ADMIN_MENU = "Выберите действие (нажмите кнопку ниже):\n• Новые записи\n• Ожидают подтверждения\n• Мастера\n• Помощь"
+MASTER_MENU = "Раздел мастера:\n• Мои заявки\n• Помощь"
+MASTER_PAGE_SIZE = 10
 
 ADMIN_ACTION_ALIASES: dict[str, set[str]] = {
     "new": {"новые записи", "новые"},
@@ -36,12 +39,43 @@ ADMIN_ACTION_ALIASES: dict[str, set[str]] = {
     "help": {"помощь", "help", "/help"},
 }
 
+MASTER_ACTION_ALIASES: dict[str, set[str]] = {
+    "my": {"мои заявки", "/my", "my"},
+    "help": {"помощь", "help", "/help"},
+}
+
+
+@dataclass
+class TelegramAccessContext:
+    tg_user_id: int
+    admin_role: AdminRole | None = None
+    master: Master | None = None
+
+    @property
+    def is_admin(self) -> bool:
+        return self.admin_role in {AdminRole.admin, AdminRole.sys_admin}
+
+    @property
+    def is_master(self) -> bool:
+        return self.master is not None
+
 
 def _admin_reply_keyboard() -> dict[str, Any]:
     return {
         "keyboard": [
             [{"text": "Новые записи"}, {"text": "Ожидают подтверждения"}],
             [{"text": "Мастера"}, {"text": "Помощь"}],
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False,
+    }
+
+
+def _master_reply_keyboard() -> dict[str, Any]:
+    return {
+        "keyboard": [
+            [{"text": "Мои заявки"}],
+            [{"text": "Помощь"}],
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False,
@@ -138,6 +172,107 @@ async def _send_admin_booking_list(db: AsyncSession, chat_id: int, list_type: st
         await send_message(chat_id=chat_id, text=_admin_update_text(booking, "Ожидает действий"), reply_markup=build_admin_inline_keyboard(booking.id))
 
 
+async def _resolve_telegram_access(db: AsyncSession, tg_user_id: int) -> TelegramAccessContext:
+    admin_role = await resolve_telegram_role(db, tg_user_id)
+    master = (await db.execute(select(Master).where(Master.telegram_user_id == tg_user_id))).scalar_one_or_none()
+    return TelegramAccessContext(tg_user_id=tg_user_id, admin_role=admin_role, master=master)
+
+
+def _master_booking_card_text(booking: Booking) -> str:
+    starts_at = booking.starts_at.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    service_title = booking.service.title if booking.service else f"ID {booking.service_id}"
+    comment = booking.comment or "—"
+    return (
+        f"Заявка #{booking.id}\n"
+        f"Дата и время: {starts_at}\n"
+        f"Услуга: {service_title}\n"
+        f"Клиент: {booking.client_name} ({booking.client_phone})\n"
+        f"Комментарий: {comment}\n"
+        f"Статус: {booking.status.value}"
+    )
+
+
+def _master_list_callback(page: int) -> str:
+    return f"m:my:{page}"
+
+
+def _parse_master_callback(value: str) -> dict[str, int | str] | None:
+    parts = value.split(":")
+    if len(parts) != 3 or parts[0] != "m" or parts[1] != "my":
+        return None
+    try:
+        page = int(parts[2])
+    except ValueError:
+        return None
+    if page < 0:
+        return None
+    return {"action": "my", "page": page}
+
+
+def _master_pagination_markup(page: int, total: int) -> dict[str, Any] | None:
+    total_pages = (total + MASTER_PAGE_SIZE - 1) // MASTER_PAGE_SIZE
+    if total_pages <= 1:
+        return None
+
+    row: list[dict[str, str]] = []
+    if page > 0:
+        row.append({"text": "⬅️ Назад", "callback_data": _master_list_callback(page - 1)})
+    if page + 1 < total_pages:
+        row.append({"text": "Дальше ➡️", "callback_data": _master_list_callback(page + 1)})
+    if not row:
+        return None
+    return {"inline_keyboard": [row]}
+
+
+async def _send_master_bookings(db: AsyncSession, chat_id: int, master: Master, page: int = 0) -> None:
+    total = (
+        await db.execute(
+            select(func.count(Booking.id)).where(
+                Booking.master_id == master.id,
+                Booking.status.in_([BookingStatus.confirmed, BookingStatus.done]),
+            )
+        )
+    ).scalar_one()
+    if total == 0:
+        await send_message(chat_id=chat_id, text="У вас пока нет подтверждённых заявок.", reply_markup=_master_reply_keyboard())
+        return
+
+    max_page = max((total - 1) // MASTER_PAGE_SIZE, 0)
+    page = min(page, max_page)
+    offset = page * MASTER_PAGE_SIZE
+    bookings = (
+        await db.execute(
+            select(Booking)
+            .where(
+                Booking.master_id == master.id,
+                Booking.status.in_([BookingStatus.confirmed, BookingStatus.done]),
+            )
+            .options(selectinload(Booking.service))
+            .order_by(Booking.starts_at.asc(), Booking.id.asc())
+            .offset(offset)
+            .limit(MASTER_PAGE_SIZE)
+        )
+    ).scalars().all()
+
+    for booking in bookings:
+        await send_message(chat_id=chat_id, text=_master_booking_card_text(booking))
+
+    pagination = _master_pagination_markup(page, total)
+    page_text = f"Страница {page + 1} из {max_page + 1}. Всего заявок: {total}."
+    await send_message(chat_id=chat_id, text=page_text, reply_markup=pagination)
+
+
+async def _handle_master_message(db: AsyncSession, chat_id: int, text: str, master: Master) -> None:
+    normalized_text = _normalize_action_text(text)
+    if normalized_text in MASTER_ACTION_ALIASES["my"]:
+        await _send_master_bookings(db, chat_id, master, page=0)
+        return
+    if normalized_text in MASTER_ACTION_ALIASES["help"]:
+        await send_message(chat_id=chat_id, text="Используйте кнопку «Мои заявки» или команду /my.", reply_markup=_master_reply_keyboard())
+        return
+    await send_message(chat_id=chat_id, text="Доступные действия: «Мои заявки», «Помощь».", reply_markup=_master_reply_keyboard())
+
+
 @router.get("/telegram/health")
 async def telegram_health() -> dict[str, bool]:
     return {"ok": True}
@@ -180,21 +315,21 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
     telegram_user_id = tg_user.get("id")
     if not telegram_user_id:
         return
+    telegram_user_id = int(telegram_user_id)
 
     chat_id = (message.get("chat") or {}).get("id")
-    role = await resolve_telegram_role(db, int(telegram_user_id))
-    has_admin_access = role in {AdminRole.admin, AdminRole.sys_admin}
+    access = await _resolve_telegram_access(db, telegram_user_id)
 
     if text in {"/admin", "/sys"}:
-        if text == "/sys" and role != AdminRole.sys_admin:
+        if text == "/sys" and access.admin_role != AdminRole.sys_admin:
             await send_message(chat_id=telegram_user_id, text="⛔️ Доступ запрещен")
             return
-        if role not in {AdminRole.admin, AdminRole.sys_admin}:
+        if not access.is_admin:
             await send_message(chat_id=telegram_user_id, text="⛔️ Доступ запрещен")
             return
         await send_message(
             chat_id=telegram_user_id,
-            text=f"✅ Доступ разрешен. Ваша роль: {role.value}\n\n{ADMIN_MENU}",
+            text=f"✅ Доступ разрешен. Ваша роль: {access.admin_role.value}\n\n{ADMIN_MENU}",
             reply_markup=_admin_reply_keyboard(),
         )
         return
@@ -218,39 +353,46 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
                 await db.flush()
                 await send_message(chat_id=telegram_user_id, text=f"Telegram успешно привязан к мастеру {master.name}.")
                 linked_master = True
+                access.master = master
             else:
                 await send_message(chat_id=telegram_user_id, text="Код привязки не найден или устарел.")
 
-        if linked_master and not has_admin_access:
-            await send_message(chat_id=telegram_user_id, text="OK, бот жив")
+        if access.is_admin:
+            await send_message(chat_id=telegram_user_id, text=ADMIN_MENU, reply_markup=_admin_reply_keyboard())
             return
 
-        if not has_admin_access:
-            logger.info("tg_admin denied user_id=%s", telegram_user_id)
-            await send_message(chat_id=telegram_user_id, text="Нет доступа")
+        if access.is_master:
+            start_text = "Мастерский доступ активирован." if linked_master else "Вы в мастерском разделе."
+            await send_message(chat_id=telegram_user_id, text=f"{start_text}\n\n{MASTER_MENU}", reply_markup=_master_reply_keyboard())
             return
 
-        await send_message(chat_id=telegram_user_id, text=ADMIN_MENU, reply_markup=_admin_reply_keyboard())
+        logger.info("tg_access denied user_id=%s", telegram_user_id)
+        await send_message(chat_id=telegram_user_id, text="Нет доступа. Используйте /start <token> для привязки Telegram к мастеру.")
         return
 
-    if not has_admin_access:
-        logger.info("tg_admin denied user_id=%s", telegram_user_id)
+    if access.is_admin:
+        normalized_text = _normalize_action_text(text)
+
+        if normalized_text in ADMIN_ACTION_ALIASES["new"]:
+            await _send_admin_booking_list(db, int(chat_id), "new")
+        elif normalized_text in ADMIN_ACTION_ALIASES["pending"]:
+            await _send_admin_booking_list(db, int(chat_id), "pending")
+        elif normalized_text in ADMIN_ACTION_ALIASES["masters"]:
+            masters = (await db.execute(select(Master).where(Master.is_active.is_(True)).order_by(Master.sort_order, Master.name))).scalars().all()
+            text_rows = [f"• {m.name} (id={m.id})" for m in masters] or ["Активные мастера не найдены."]
+            await send_message(chat_id=int(chat_id), text="\n".join(text_rows))
+        elif normalized_text in ADMIN_ACTION_ALIASES["help"]:
+            await send_message(chat_id=int(chat_id), text="Используйте кнопки: Новые записи / Ожидают подтверждения / Мастера", reply_markup=_admin_reply_keyboard())
+        else:
+            await send_message(chat_id=int(chat_id), text="Не понял команду. Выберите действие кнопкой ниже.", reply_markup=_admin_reply_keyboard())
         return
 
-    normalized_text = _normalize_action_text(text)
+    if access.is_master:
+        await _handle_master_message(db, int(chat_id), text, access.master)
+        return
 
-    if normalized_text in ADMIN_ACTION_ALIASES["new"]:
-        await _send_admin_booking_list(db, int(chat_id), "new")
-    elif normalized_text in ADMIN_ACTION_ALIASES["pending"]:
-        await _send_admin_booking_list(db, int(chat_id), "pending")
-    elif normalized_text in ADMIN_ACTION_ALIASES["masters"]:
-        masters = (await db.execute(select(Master).where(Master.is_active.is_(True)).order_by(Master.sort_order, Master.name))).scalars().all()
-        text_rows = [f"• {m.name} (id={m.id})" for m in masters] or ["Активные мастера не найдены."]
-        await send_message(chat_id=int(chat_id), text="\n".join(text_rows))
-    elif normalized_text in ADMIN_ACTION_ALIASES["help"]:
-        await send_message(chat_id=int(chat_id), text="Используйте кнопки: Новые записи / Ожидают подтверждения / Мастера", reply_markup=_admin_reply_keyboard())
-    else:
-        await send_message(chat_id=int(chat_id), text="Не понял команду. Выберите действие кнопкой ниже.", reply_markup=_admin_reply_keyboard())
+    logger.info("tg_access denied user_id=%s", telegram_user_id)
+    await send_message(chat_id=telegram_user_id, text="Нет доступа")
 
 
 async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> None:
@@ -260,8 +402,35 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
     actor = callback_query.get("from") or {}
     actor_name = actor.get("username") or actor.get("first_name")
     actor_tg_user_id = actor.get("id")
-    role = await resolve_telegram_role(db, int(actor_tg_user_id) if actor_tg_user_id is not None else None)
-    if role not in {AdminRole.admin, AdminRole.sys_admin}:
+    if actor_tg_user_id is None:
+        if callback_id:
+            await answer_callback_query(callback_id, "Нет доступа")
+        return
+    access = await _resolve_telegram_access(db, int(actor_tg_user_id))
+
+    master_parsed = _parse_master_callback(str(data or ""))
+    if master_parsed:
+        if not access.is_master:
+            logger.info("tg_master denied user_id=%s", actor_tg_user_id)
+            if callback_id:
+                await answer_callback_query(callback_id, "Нет доступа")
+            return
+        callback_chat_id = (message.get("chat") or {}).get("id")
+        if callback_chat_id is None:
+            if callback_id:
+                await answer_callback_query(callback_id, "Не удалось определить чат")
+            return
+        await _send_master_bookings(
+            db=db,
+            chat_id=int(callback_chat_id),
+            master=access.master,
+            page=int(master_parsed["page"]),
+        )
+        if callback_id:
+            await answer_callback_query(callback_id)
+        return
+
+    if not access.is_admin:
         logger.info("tg_admin denied user_id=%s", actor_tg_user_id)
         if callback_id:
             await answer_callback_query(callback_id, "Нет доступа")
@@ -316,7 +485,7 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
             db,
             actor_type=AuditActorType.telegram,
             actor_tg_user_id=int(actor_tg_user_id),
-            actor_role=role,
+            actor_role=access.admin_role,
             action="booking.assign_master",
             entity_type="booking",
             entity_id=booking.id,
@@ -346,7 +515,7 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
             db,
             actor_type=AuditActorType.telegram,
             actor_tg_user_id=int(actor_tg_user_id),
-            actor_role=role,
+            actor_role=access.admin_role,
             action="booking.confirm",
             entity_type="booking",
             entity_id=booking.id,
@@ -395,7 +564,7 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
             db,
             actor_type=AuditActorType.telegram,
             actor_tg_user_id=int(actor_tg_user_id),
-            actor_role=role,
+            actor_role=access.admin_role,
             action="booking.cancel",
             entity_type="booking",
             entity_id=booking.id,

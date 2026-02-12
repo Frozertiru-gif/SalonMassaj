@@ -135,7 +135,7 @@ def _admin_update_text(booking: Booking, action_text: str, actor_name: str | Non
             "master_name": booking.master.name if booking.master else "Не назначен",
             "comment": booking.comment,
             "starts_at": booking.starts_at.isoformat(),
-            "starts_at_human": booking.starts_at.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC"),
+            "starts_at_human": booking.starts_at.replace(tzinfo=None).strftime("%d.%m.%Y %H:%M"),
             "status": booking.status.value,
         },
         mask_client_phone=False,
@@ -179,7 +179,7 @@ async def _resolve_telegram_access(db: AsyncSession, tg_user_id: int) -> Telegra
 
 
 def _master_booking_card_text(booking: Booking) -> str:
-    starts_at = booking.starts_at.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    starts_at = booking.starts_at.replace(tzinfo=None).strftime("%d.%m.%Y %H:%M")
     service_title = booking.service.title if booking.service else f"ID {booking.service_id}"
     comment = booking.comment or "—"
     return (

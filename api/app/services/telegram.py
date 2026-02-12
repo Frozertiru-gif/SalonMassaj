@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -67,8 +67,7 @@ def normalize_tg_notifications(raw: dict[str, Any] | None) -> TgNotificationsSet
 
 
 def booking_time_human(starts_at: datetime) -> str:
-    normalized = starts_at if starts_at.tzinfo else starts_at.replace(tzinfo=timezone.utc)
-    return normalized.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    return starts_at.replace(tzinfo=None).strftime("%d.%m.%Y %H:%M")
 
 
 def booking_admin_text(payload: dict[str, Any], template: str | None = None, *, mask_client_phone: bool = True) -> str:

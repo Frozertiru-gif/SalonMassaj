@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -104,8 +104,8 @@ async def get_availability_slots(
     for day_range in ranges:
         start_time = parse_time(day_range["start"])
         end_time = parse_time(day_range["end"])
-        start_dt = datetime.combine(target_date, start_time, tzinfo=timezone.utc)
-        end_dt = datetime.combine(target_date, end_time, tzinfo=timezone.utc)
+        start_dt = datetime.combine(target_date, start_time)
+        end_dt = datetime.combine(target_date, end_time)
         cursor = start_dt
         while cursor + duration <= end_dt:
             slot_start = cursor

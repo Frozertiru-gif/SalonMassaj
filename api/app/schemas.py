@@ -48,7 +48,7 @@ class ServiceCategoryBase(BaseModel):
 
 
 class ServiceCategoryCreate(ServiceCategoryBase):
-    pass
+    slug: str | None = None
 
 
 class ServiceCategoryUpdate(BaseModel):

@@ -176,7 +176,6 @@ export async function createCategory(
 ): Promise<AdminFormState> {
     const payload = {
     title: formData.get("title"),
-    slug: formData.get("slug"),
     sort_order: Number(formData.get("sort_order") || 0),
     is_active: formData.get("is_active") === "on"
   };
@@ -239,7 +238,6 @@ export async function updateCategory(
     const id = Number(formData.get("id"));
   const payload = {
     title: formData.get("title"),
-    slug: formData.get("slug"),
     sort_order: Number(formData.get("sort_order") || 0),
     is_active: formData.get("is_active") === "on"
   };

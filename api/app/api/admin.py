@@ -292,7 +292,13 @@ async def list_categories(db: AsyncSession = Depends(get_db)):
 
 @router.post("/categories", response_model=ServiceCategoryOut)
 async def create_category(payload: ServiceCategoryCreate, db: AsyncSession = Depends(get_db)):
-    category = ServiceCategory(**payload.model_dump())
+    payload_data = payload.model_dump()
+    base_slug = normalize_slug((payload.slug or payload.title) or "")
+    existing_slugs = set(
+        (await db.execute(select(ServiceCategory.slug).where(ServiceCategory.slug.like(f"{base_slug}%")))).scalars().all()
+    )
+    payload_data["slug"] = pick_unique_slug(base_slug, existing_slugs)
+    category = ServiceCategory(**payload_data)
     db.add(category)
     try:
         await db.flush()
@@ -309,12 +315,13 @@ async def update_category(category_id: int, payload: ServiceCategoryUpdate, db: 
     if not category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
     updates = payload.model_dump(exclude_unset=True)
-    if "slug" in updates and updates["slug"] is not None:
-        existing = await db.execute(
-            select(ServiceCategory.id).where(ServiceCategory.slug == updates["slug"], ServiceCategory.id != category_id)
+    title_for_slug = updates.get("title") or updates.get("slug")
+    if title_for_slug:
+        base_slug = normalize_slug(title_for_slug)
+        existing_slugs = set(
+            (await db.execute(select(ServiceCategory.slug).where(ServiceCategory.slug.like(f"{base_slug}%"), ServiceCategory.id != category_id))).scalars().all()
         )
-        if existing.scalar_one_or_none() is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category with this slug already exists")
+        updates["slug"] = pick_unique_slug(base_slug, existing_slugs)
     for key, value in updates.items():
         setattr(category, key, value)
     try:

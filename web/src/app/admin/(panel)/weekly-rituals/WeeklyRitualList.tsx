@@ -33,7 +33,6 @@ function WeeklyRitualRow({ ritual }: { ritual: WeeklyRitual }) {
     <Card className="flex flex-wrap items-center justify-between gap-4">
       <div>
         <p className="text-sm font-medium text-ink-900">{ritual.title}</p>
-        <p className="text-xs text-ink-500">{ritual.slug || "Без slug"}</p>
       </div>
       <div className="text-xs uppercase tracking-[0.2em] text-blush-600">
         {ritual.is_active ? "Активен" : "Выключен"}

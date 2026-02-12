@@ -30,14 +30,6 @@ export function WeeklyRitualForm({ action, initialData, submitLabel }: WeeklyRit
             className="mt-2 w-full rounded-2xl border border-blush-100 px-4 py-3"
           />
         </div>
-        <div>
-          <label className="text-xs font-medium text-ink-700">Slug</label>
-          <input
-            name="slug"
-            defaultValue={initialData?.slug ?? undefined}
-            className="mt-2 w-full rounded-2xl border border-blush-100 px-4 py-3"
-          />
-        </div>
         <div className="md:col-span-2">
           <label className="text-xs font-medium text-ink-700">Короткое описание</label>
           <input

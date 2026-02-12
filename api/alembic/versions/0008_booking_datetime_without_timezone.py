@@ -1,7 +1,7 @@
 """booking datetime without timezone
 
 Revision ID: 0008_booking_datetime_without_timezone
-Revises: 0007_master_telegram_chat_fields
+Revises: 0007
 Create Date: 2026-02-12 00:00:00.000000
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "0008_booking_datetime_without_timezone"
-down_revision = "0007_master_telegram_chat_fields"
+down_revision = "0007"
 branch_labels = None
 depends_on = None
 

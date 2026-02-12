@@ -11,7 +11,7 @@ body {
 }
 
 main {
-  @apply pt-20;
+  @apply pt-24;
 }
 
 ::selection {

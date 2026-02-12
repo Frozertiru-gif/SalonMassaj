@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
@@ -108,7 +108,7 @@ async def get_availability(service_id: int, date: str, master_id: int | None = N
     except ValueError as exc:
         logger.warning("Invalid date in public availability request: %s", date)
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     slots = await get_availability_slots(db, service_id, target_date, now, master_id=master_id)
     return {"slots": [{"starts_at": slot[0], "ends_at": slot[1]} for slot in slots]}
 
@@ -120,7 +120,7 @@ async def get_booking_slots(service_id: int, date: str, master_id: int | None = 
     except ValueError as exc:
         logger.warning("Invalid date in public booking slots request: %s", date)
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     slots = await get_availability_slots(db, service_id, target_date, now, master_id=master_id)
     return [{"time": slot[0].strftime("%H:%M"), "starts_at": slot[0], "ends_at": slot[1]} for slot in slots]
 
@@ -135,7 +135,7 @@ async def get_public_setting(key: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/bookings", response_model=BookingOut)
 async def create_booking(payload: BookingCreate, db: AsyncSession = Depends(get_db)):
-    now = datetime.now(timezone.utc)
+    now = datetime.now()
     try:
         requested_start = normalize_booking_start(payload.starts_at, payload.date, payload.time)
     except ValueError as exc:

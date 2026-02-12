@@ -1,7 +1,7 @@
 import logging
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import or_, select
@@ -621,9 +621,9 @@ async def list_bookings(
     if unread is False:
         query = query.where(Booking.is_read.is_(True))
     if date_from:
-        query = query.where(Booking.starts_at >= datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc))
+        query = query.where(Booking.starts_at >= datetime.strptime(date_from, "%Y-%m-%d"))
     if date_to:
-        query = query.where(Booking.starts_at <= datetime.strptime(date_to, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=timezone.utc))
+        query = query.where(Booking.starts_at <= datetime.strptime(date_to, "%Y-%m-%d").replace(hour=23, minute=59))
     if service_id is not None:
         query = query.where(Booking.service_id == service_id)
     if master_id is not None:
@@ -641,14 +641,14 @@ async def list_booking_slots(service_id: int, date: str, master_id: int | None =
     except ValueError as exc:
         logger.warning("Invalid date in admin booking slots request: %s", date)
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    slots = await get_availability_slots(db, service_id, target_date, datetime.now(timezone.utc), master_id=master_id)
+    slots = await get_availability_slots(db, service_id, target_date, datetime.now(), master_id=master_id)
     return [{"time": slot[0].strftime("%H:%M"), "starts_at": slot[0], "ends_at": slot[1]} for slot in slots]
 
 
 @router.post("/bookings", response_model=BookingOut)
 async def create_booking(payload: BookingAdminCreate, request: Request, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin)):
-    requested_start = datetime.combine(payload.date, payload.time, tzinfo=timezone.utc)
-    chosen = await resolve_available_slot(db, payload.service_id, requested_start, datetime.now(timezone.utc), master_id=payload.master_id)
+    requested_start = datetime.combine(payload.date, payload.time)
+    chosen = await resolve_available_slot(db, payload.service_id, requested_start, datetime.now(), master_id=payload.master_id)
 
     try:
         booking_status = BookingStatus(payload.status)

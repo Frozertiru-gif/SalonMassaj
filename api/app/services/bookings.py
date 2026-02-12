@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,8 +26,7 @@ def _parse_time(value: str) -> time:
 
 def normalize_booking_start(starts_at: datetime | None = None, booking_date: str | date | None = None, booking_time: str | time | None = None) -> datetime:
     if starts_at is not None:
-        normalized = starts_at if starts_at.tzinfo else starts_at.replace(tzinfo=timezone.utc)
-        return normalized.astimezone(timezone.utc).replace(second=0, microsecond=0)
+        return starts_at.replace(tzinfo=None, second=0, microsecond=0)
 
     if booking_date is None:
         raise ValueError("field 'starts_at' is required")
@@ -45,7 +44,7 @@ def normalize_booking_start(starts_at: datetime | None = None, booking_date: str
     else:
         parsed_time = booking_time.replace(second=0, microsecond=0)
 
-    return datetime.combine(parsed_date, parsed_time, tzinfo=timezone.utc)
+    return datetime.combine(parsed_date, parsed_time)
 
 
 async def resolve_available_slot(

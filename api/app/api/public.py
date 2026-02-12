@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,9 +22,10 @@ from app.schemas import (
 )
 from app.services.bookings import booking_validation_error, normalize_booking_start, resolve_available_slot
 from app.services.telegram import build_booking_notification_payload, send_booking_created_to_admin
-from app.utils import get_availability_slots, get_setting
+from app.utils import get_availability_slots, get_setting, parse_date_param
 
 router = APIRouter(prefix="/public", tags=["public"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/services", response_model=list[ServiceOut])
@@ -100,16 +102,26 @@ async def list_reviews(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/availability", response_model=AvailabilityOut)
-async def get_availability(service_id: int, date: date, master_id: int | None = None, db: AsyncSession = Depends(get_db)):
+async def get_availability(service_id: int, date: str, master_id: int | None = None, db: AsyncSession = Depends(get_db)):
+    try:
+        target_date = parse_date_param(date)
+    except ValueError as exc:
+        logger.warning("Invalid date in public availability request: %s", date)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     now = datetime.now(timezone.utc)
-    slots = await get_availability_slots(db, service_id, date, now, master_id=master_id)
+    slots = await get_availability_slots(db, service_id, target_date, now, master_id=master_id)
     return {"slots": [{"starts_at": slot[0], "ends_at": slot[1]} for slot in slots]}
 
 
 @router.get("/bookings/slots", response_model=list[BookingSlotOut])
-async def get_booking_slots(service_id: int, date: date, master_id: int | None = None, db: AsyncSession = Depends(get_db)):
+async def get_booking_slots(service_id: int, date: str, master_id: int | None = None, db: AsyncSession = Depends(get_db)):
+    try:
+        target_date = parse_date_param(date)
+    except ValueError as exc:
+        logger.warning("Invalid date in public booking slots request: %s", date)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     now = datetime.now(timezone.utc)
-    slots = await get_availability_slots(db, service_id, date, now, master_id=master_id)
+    slots = await get_availability_slots(db, service_id, target_date, now, master_id=master_id)
     return [{"time": slot[0].strftime("%H:%M"), "starts_at": slot[0], "ends_at": slot[1]} for slot in slots]
 
 

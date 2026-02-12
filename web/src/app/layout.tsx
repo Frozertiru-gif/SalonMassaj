@@ -11,7 +11,9 @@ export const metadata: Metadata = {
     telephone: false
   },
   icons: {
-    icon: "/favicon.ico"
+    icon: "/images/logo-icon.svg",
+    shortcut: "/images/logo-icon.svg",
+    apple: "/images/logo-icon.svg"
   }
 };
 

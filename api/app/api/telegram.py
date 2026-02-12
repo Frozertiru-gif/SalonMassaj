@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.db import get_db
 from app.models import AdminRole, AuditActorType, Booking, BookingStatus, Master
-from app.services.access import get_telegram_admin_ids, resolve_telegram_role
+from app.services.access import resolve_telegram_role
 from app.services.audit import log_event
 from app.services.telegram import (
     answer_callback_query,
@@ -160,7 +160,7 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
 
     chat_id = (message.get("chat") or {}).get("id")
     role = await resolve_telegram_role(db, int(telegram_user_id))
-    admin_ids = await get_telegram_admin_ids(db)
+    has_admin_access = role in {AdminRole.admin, AdminRole.sys_admin}
 
     if text in {"/admin", "/sys"}:
         if text == "/sys" and role != AdminRole.sys_admin:
@@ -194,11 +194,11 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
             else:
                 await send_message(chat_id=telegram_user_id, text="Код привязки не найден или устарел.")
 
-        if linked_master and int(telegram_user_id) not in admin_ids:
+        if linked_master and not has_admin_access:
             await send_message(chat_id=telegram_user_id, text="OK, бот жив")
             return
 
-        if int(telegram_user_id) not in admin_ids:
+        if not has_admin_access:
             logger.info("tg_admin denied user_id=%s", telegram_user_id)
             await send_message(chat_id=telegram_user_id, text="Нет доступа")
             return
@@ -206,7 +206,7 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
         await send_message(chat_id=telegram_user_id, text=ADMIN_MENU)
         return
 
-    if int(telegram_user_id) not in admin_ids:
+    if not has_admin_access:
         logger.info("tg_admin denied user_id=%s", telegram_user_id)
         return
 

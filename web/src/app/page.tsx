@@ -105,7 +105,7 @@ export default async function HomePage() {
   const servicesPreview = services.slice(0, 12);
 
   return (
-    <div>
+    <div className="-mt-4">
       <Section className="bg-gradient-to-br from-blush-100 via-blush-50 to-peach-100 pt-12">
         <Container className="grid items-center gap-12 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="relative space-y-6">

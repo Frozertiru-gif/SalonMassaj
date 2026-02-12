@@ -34,14 +34,19 @@ function buildBookingsPath(searchParams: Record<string, string | undefined>) {
 async function updateAction(formData: FormData) {
   "use server";
   const finalPriceRub = (formData.get("final_price_rub") as string | null)?.trim();
-  await updateBookingAdmin({
+  const payload: Parameters<typeof updateBookingAdmin>[0] = {
     id: Number(formData.get("id")),
     status: String(formData.get("status")),
     is_read: formData.get("is_read") === "on",
     master_id: formData.get("master_id") ? Number(formData.get("master_id")) : null,
-    admin_comment: (formData.get("admin_comment") as string) || null,
-    final_price_cents: finalPriceRub ? Number(finalPriceRub) * 100 : null
-  });
+    admin_comment: (formData.get("admin_comment") as string) || null
+  };
+
+  if (finalPriceRub) {
+    payload.final_price_cents = Number(finalPriceRub) * 100;
+  }
+
+  await updateBookingAdmin(payload);
 }
 
 export default async function AdminBookingsPage({ searchParams }: { searchParams: Record<string, string | undefined> }) {

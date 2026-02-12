@@ -1,9 +1,9 @@
 import { adminFetch } from "@/lib/api";
 import type { Booking, Master, Service } from "@/lib/types";
+import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { Container } from "@/components/Container";
 import { updateBookingAdmin } from "../../actions";
-import { AdminBookingCreateForm } from "./AdminBookingCreateForm";
 
 
 function formatPrice(cents?: number | null) {
@@ -67,9 +67,14 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
 
   return (
     <Container className="space-y-6">
-      <div>
-        <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Записи</p>
-        <h2 className="mt-2 text-2xl font-semibold text-ink-900">Управление заявками</h2>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-sm uppercase tracking-[0.3em] text-blush-600">Записи</p>
+          <h2 className="mt-2 text-2xl font-semibold text-ink-900">Управление заявками</h2>
+        </div>
+        <Button href="/admin/bookings/new" variant="secondary">
+          Добавить
+        </Button>
       </div>
 
       <Card className="space-y-3">
@@ -97,10 +102,6 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
         </form>
       </Card>
 
-      <Card className="space-y-3">
-        <h3 className="text-lg font-semibold text-ink-900">Создать запись</h3>
-        <AdminBookingCreateForm services={services} />
-      </Card>
 
       <div className="space-y-3">
         <div className="mb-2 hidden grid-cols-[minmax(120px,1.2fr)_minmax(140px,1.2fr)_minmax(130px,1fr)_minmax(120px,0.8fr)] gap-3 px-2 text-xs font-semibold uppercase tracking-[0.15em] text-ink-500 md:grid">

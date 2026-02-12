@@ -285,6 +285,8 @@ async def unlink_master_telegram(master_id: int, db: AsyncSession = Depends(get_
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Master not found")
 
     master.telegram_user_id = None
+    master.telegram_chat_id = None
+    master.telegram_username = None
     master.telegram_linked_at = None
     await db.flush()
     return MasterTelegramUnlinkOut(master_id=master.id, unlinked=True)
@@ -444,13 +446,17 @@ async def delete_review(review_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/settings/{key}", response_model=SettingOut)
 async def get_setting(key: str, db: AsyncSession = Depends(get_db)):
-    if key not in {"business_hours", "slot_step_min", "booking_rules", "contacts", "tg_notifications"}:
+    if key not in {"business_hours", "slot_step_min", "booking_rules", "contacts", "tg_notifications", "tg_admins", "tg_mode"}:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Setting not found")
     result = await db.execute(select(Setting).where(Setting.key == key))
     setting = result.scalar_one_or_none()
     if not setting:
         if key == "tg_notifications":
             return {"key": key, "value_jsonb": normalize_tg_notifications({}).model_dump(), "updated_at": None}
+        if key == "tg_admins":
+            return {"key": key, "value_jsonb": {"user_ids": []}, "updated_at": None}
+        if key == "tg_mode":
+            return {"key": key, "value_jsonb": {"mode": settings.telegram_mode}, "updated_at": None}
         return {"key": key, "value_jsonb": {}, "updated_at": None}
     if key == "tg_notifications":
         setting.value_jsonb = normalize_tg_notifications(setting.value_jsonb).model_dump()
@@ -459,7 +465,7 @@ async def get_setting(key: str, db: AsyncSession = Depends(get_db)):
 
 @router.put("/settings/{key}", response_model=SettingOut)
 async def update_setting(key: str, payload: SettingUpdate, request: Request, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin)):
-    if key not in {"business_hours", "slot_step_min", "booking_rules", "contacts", "tg_notifications"}:
+    if key not in {"business_hours", "slot_step_min", "booking_rules", "contacts", "tg_notifications", "tg_admins", "tg_mode"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid setting key")
     if not isinstance(payload.value_jsonb, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid setting value")
@@ -498,9 +504,31 @@ async def send_telegram_test_message(payload: TelegramTestMessageIn, db: AsyncSe
     await send_message(
         chat_id=tg_settings.admin_chat_id,
         text=payload.text,
-        thread_id=tg_settings.admin_thread_id,
+        thread_id=tg_settings.thread_id,
     )
     return TelegramTestMessageOut(ok=True, detail="Test message sent")
+
+
+@router.get("/telegram/test")
+async def telegram_test(db: AsyncSession = Depends(get_db)):
+    if not settings.telegram_bot_token:
+        return {"ok": False, "reason": "no_token"}
+
+    tg_settings = await get_tg_notifications_settings(db)
+    if not tg_settings.enabled:
+        return {"ok": False, "reason": "disabled"}
+    if not tg_settings.admin_chat_id:
+        return {"ok": False, "reason": "no_admin_chat_id"}
+
+    try:
+        await send_message(
+            chat_id=tg_settings.admin_chat_id,
+            text="Telegram test from /admin/telegram/test",
+            thread_id=tg_settings.thread_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": f"send_failed:{exc.__class__.__name__}"}
+    return {"ok": True, "reason": "sent"}
 
 
 

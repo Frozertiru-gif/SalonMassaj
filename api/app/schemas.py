@@ -134,6 +134,7 @@ class MasterUpdate(BaseModel):
     bio: str | None = None
     is_active: bool | None = None
     sort_order: int | None = None
+    telegram_user_id: int | None = None
     service_ids: list[int] | None = None
 
 
@@ -167,6 +168,8 @@ class MasterOut(BaseModel):
     is_active: bool
     sort_order: int
     telegram_user_id: int | None = None
+    telegram_chat_id: int | None = None
+    telegram_username: str | None = None
     telegram_link_code: str | None = None
     telegram_linked_at: datetime | None = None
     created_at: datetime
@@ -271,8 +274,11 @@ class SettingUpdate(BaseModel):
 class TgNotificationsSettings(BaseModel):
     enabled: bool = False
     admin_chat_id: str | int | None = None
-    admin_thread_id: int | None = None
-    template_admin: str = "Новая запись: {client_name} ({client_phone})\nУслуга: {service_title}\n{starts_at_human}"
+    thread_id: int | None = None
+    template_booking_created: str | None = None
+    template_booking_confirmed_admin: str | None = None
+    template_booking_assigned_master: str | None = None
+    template_admin: str | None = None
     send_inline_actions: bool = True
     public_webhook_base_url: str | None = None
     webhook_secret: str | None = None

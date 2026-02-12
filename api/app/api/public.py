@@ -20,7 +20,7 @@ from app.schemas import (
     WeeklyRitualOut,
 )
 from app.services.bookings import booking_validation_error, normalize_booking_start, resolve_available_slot
-from app.services.telegram import build_booking_notification_payload, send_booking_notification
+from app.services.telegram import build_booking_notification_payload, send_booking_created_to_admin
 from app.utils import get_availability_slots, get_setting
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -159,6 +159,6 @@ async def create_booking(payload: BookingCreate, db: AsyncSession = Depends(get_
 
     db.add(Notification(type=NotificationType.booking_created, payload=notification, is_read=False))
 
-    await send_booking_notification(db, notification)
+    await send_booking_created_to_admin(db, booking.id)
 
     return booking_full

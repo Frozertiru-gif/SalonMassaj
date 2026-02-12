@@ -11,8 +11,10 @@ type AdminSettingResponse = {
 type TgSettings = {
   enabled: boolean;
   admin_chat_id: string | number | null;
-  admin_thread_id: number | null;
-  template_admin: string;
+  thread_id: number | null;
+  template_booking_created: string | null;
+  template_booking_confirmed_admin: string | null;
+  template_booking_assigned_master: string | null;
   send_inline_actions: boolean;
   public_webhook_base_url: string | null;
   webhook_secret: string | null;
@@ -66,10 +68,10 @@ export default async function AdminSettingsPage() {
             className="rounded-2xl border border-blush-100 px-4 py-3 text-sm"
           />
           <input
-            name="admin_thread_id"
+            name="thread_id"
             type="number"
-            placeholder="admin_thread_id (optional)"
-            defaultValue={tg.admin_thread_id ?? ""}
+            placeholder="thread_id (optional)"
+            defaultValue={tg.thread_id ?? ""}
             className="rounded-2xl border border-blush-100 px-4 py-3 text-sm"
           />
           <label className="text-sm md:col-span-2">
@@ -89,9 +91,24 @@ export default async function AdminSettingsPage() {
             className="rounded-2xl border border-blush-100 px-4 py-3 text-sm md:col-span-2"
           />
           <textarea
-            name="template_admin"
+            name="template_booking_created"
             rows={5}
-            defaultValue={tg.template_admin ?? ""}
+            defaultValue={tg.template_booking_created ?? ""}
+            placeholder="Шаблон создания записи"
+            className="rounded-2xl border border-blush-100 px-4 py-3 text-sm md:col-span-2"
+          />
+          <textarea
+            name="template_booking_confirmed_admin"
+            rows={2}
+            defaultValue={tg.template_booking_confirmed_admin ?? ""}
+            placeholder="Шаблон подтверждения для админа"
+            className="rounded-2xl border border-blush-100 px-4 py-3 text-sm md:col-span-2"
+          />
+          <textarea
+            name="template_booking_assigned_master"
+            rows={4}
+            defaultValue={tg.template_booking_assigned_master ?? ""}
+            placeholder="Шаблон уведомления мастеру"
             className="rounded-2xl border border-blush-100 px-4 py-3 text-sm md:col-span-2"
           />
           <Button type="submit" variant="secondary" className="md:col-span-2">

@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.db import get_db
 from app.models import AdminRole, AuditActorType, Booking, BookingStatus, Master
-from app.services.access import resolve_telegram_role
+from app.services.access import get_telegram_admin_ids, resolve_telegram_role
 from app.services.audit import log_event
 from app.services.telegram import (
     answer_callback_query,
@@ -26,6 +26,8 @@ from app.services.telegram import (
 
 router = APIRouter(tags=["telegram"])
 logger = logging.getLogger(__name__)
+
+ADMIN_MENU = "Выберите действие:\n• Новые записи\n• Ожидают подтверждения\n• Мастера\n• Помощь"
 
 
 def _extract_from_id(update: dict[str, Any]) -> int | None:
@@ -50,14 +52,10 @@ def _update_kind(update: dict[str, Any]) -> str:
 
 def log_update_received(update: dict[str, Any]) -> None:
     logger.info(
-        "TG update received",
-        extra={
-            "update_id": update.get("update_id"),
-            "update_type": _update_kind(update),
-            "from_id": _extract_from_id(update),
-            "has_message": "message" in update,
-            "has_callback": "callback_query" in update,
-        },
+        "tg_update.received update_id=%s update_type=%s from_id=%s",
+        update.get("update_id"),
+        _update_kind(update),
+        _extract_from_id(update),
     )
 
 
@@ -79,6 +77,7 @@ def _admin_update_text(booking: Booking, action_text: str, actor_name: str | Non
             "service_id": booking.service_id,
             "service_title": booking.service.title if booking.service else f"ID {booking.service_id}",
             "master_name": booking.master.name if booking.master else "Не назначен",
+            "comment": booking.comment,
             "starts_at": booking.starts_at.isoformat(),
             "starts_at_human": booking.starts_at.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC"),
             "status": booking.status.value,
@@ -93,11 +92,27 @@ def _master_picker_keyboard(booking_id: int, masters: list[Master]) -> dict[str,
             [
                 {
                     "text": master.name,
-                    "callback_data": callback_data("set", booking_id, master.id),
+                    "callback_data": callback_data("assign", booking_id, master.id),
                 }
             ]
         )
-    return {"inline_keyboard": rows or [[{"text": "Нет активных мастеров", "callback_data": callback_data("pick", booking_id)}]]}
+    return {"inline_keyboard": rows or [[{"text": "Нет активных мастеров", "callback_data": callback_data("choose", booking_id)}]]}
+
+
+async def _send_admin_booking_list(db: AsyncSession, chat_id: int, list_type: str) -> None:
+    query = select(Booking).options(selectinload(Booking.service), selectinload(Booking.master)).order_by(Booking.created_at.desc()).limit(10)
+    if list_type == "new":
+        query = query.where(Booking.status == BookingStatus.new)
+    elif list_type == "pending":
+        query = query.where(Booking.status == BookingStatus.new, Booking.is_read.is_(False))
+
+    bookings = (await db.execute(query)).scalars().all()
+    if not bookings:
+        await send_message(chat_id=chat_id, text="Записей не найдено.")
+        return
+
+    for booking in bookings:
+        await send_message(chat_id=chat_id, text=_admin_update_text(booking, "Ожидает действий"), reply_markup=build_admin_inline_keyboard(booking.id))
 
 
 @router.get("/telegram/health")
@@ -110,9 +125,10 @@ async def telegram_webhook(request: Request, db: AsyncSession = Depends(get_db))
     tg_settings = await get_tg_notifications_settings(db)
     required_secret = settings.telegram_webhook_secret or tg_settings.webhook_secret
     if not required_secret:
-        logger.error("Telegram webhook secret is not configured")
+        logger.error("tg_webhook.reject reason=no_secret")
         return {"ok": False, "detail": "webhook secret is not configured"}
     if not await _is_valid_secret(request, required_secret):
+        logger.warning("tg_webhook.reject reason=invalid_secret")
         return {"ok": False, "detail": "invalid secret"}
 
     try:
@@ -132,7 +148,7 @@ async def process_update(update: dict[str, Any], db: AsyncSession) -> None:
         elif "callback_query" in update:
             await _handle_callback(update["callback_query"], db)
     except Exception:  # noqa: BLE001
-        logger.exception("Failed to process Telegram update")
+        logger.exception("tg_update.failed")
 
 
 async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
@@ -142,7 +158,9 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
     if not telegram_user_id:
         return
 
+    chat_id = (message.get("chat") or {}).get("id")
     role = await resolve_telegram_role(db, int(telegram_user_id))
+    admin_ids = await get_telegram_admin_ids(db)
 
     if text in {"/admin", "/sys"}:
         if text == "/sys" and role != AdminRole.sys_admin:
@@ -154,29 +172,54 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
         await send_message(chat_id=telegram_user_id, text=f"✅ Доступ разрешен. Ваша роль: {role.value}")
         return
 
-    if not text.startswith("/start"):
+    if text.startswith("/start"):
+        payload = ""
+        parts = text.split(maxsplit=1)
+        if len(parts) == 2:
+            payload = parts[1].strip()
+        linked_master = False
+
+        if payload:
+            result = await db.execute(select(Master).where(Master.telegram_link_code == payload))
+            master = result.scalar_one_or_none()
+            if master:
+                master.telegram_user_id = int(telegram_user_id)
+                master.telegram_chat_id = int(chat_id) if chat_id is not None else None
+                master.telegram_username = tg_user.get("username")
+                master.telegram_linked_at = datetime.now(timezone.utc)
+                master.telegram_link_code = None
+                await db.flush()
+                await send_message(chat_id=telegram_user_id, text=f"Telegram успешно привязан к мастеру {master.name}.")
+                linked_master = True
+            else:
+                await send_message(chat_id=telegram_user_id, text="Код привязки не найден или устарел.")
+
+        if linked_master and int(telegram_user_id) not in admin_ids:
+            await send_message(chat_id=telegram_user_id, text="OK, бот жив")
+            return
+
+        if int(telegram_user_id) not in admin_ids:
+            logger.info("tg_admin denied user_id=%s", telegram_user_id)
+            await send_message(chat_id=telegram_user_id, text="Нет доступа")
+            return
+
+        await send_message(chat_id=telegram_user_id, text=ADMIN_MENU)
         return
 
-    payload = ""
-    parts = text.split(maxsplit=1)
-    if len(parts) == 2:
-        payload = parts[1].strip()
+    if int(telegram_user_id) not in admin_ids:
+        logger.info("tg_admin denied user_id=%s", telegram_user_id)
+        return
 
-    logger.info("/start received", extra={"from_id": int(telegram_user_id), "payload": payload or None})
-
-    if payload:
-        result = await db.execute(select(Master).where(Master.telegram_link_code == payload))
-        master = result.scalar_one_or_none()
-        if master:
-            master.telegram_user_id = int(telegram_user_id)
-            master.telegram_linked_at = datetime.now(timezone.utc)
-            master.telegram_link_code = None
-            await db.flush()
-            await send_message(chat_id=telegram_user_id, text=f"Telegram успешно привязан к мастеру {master.name}.")
-        else:
-            await send_message(chat_id=telegram_user_id, text="Код привязки не найден или устарел.")
-
-    await send_message(chat_id=telegram_user_id, text="OK, бот жив")
+    if text == "Новые записи":
+        await _send_admin_booking_list(db, int(chat_id), "new")
+    elif text == "Ожидают подтверждения":
+        await _send_admin_booking_list(db, int(chat_id), "pending")
+    elif text == "Мастера":
+        masters = (await db.execute(select(Master).where(Master.is_active.is_(True)).order_by(Master.sort_order, Master.name))).scalars().all()
+        text_rows = [f"• {m.name} (id={m.id})" for m in masters] or ["Активные мастера не найдены."]
+        await send_message(chat_id=int(chat_id), text="\n".join(text_rows))
+    elif text == "Помощь":
+        await send_message(chat_id=int(chat_id), text="Используйте кнопки: Новые записи / Ожидают подтверждения / Мастера")
 
 
 async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> None:
@@ -188,8 +231,9 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
     actor_tg_user_id = actor.get("id")
     role = await resolve_telegram_role(db, int(actor_tg_user_id) if actor_tg_user_id is not None else None)
     if role not in {AdminRole.admin, AdminRole.sys_admin}:
+        logger.info("tg_admin denied user_id=%s", actor_tg_user_id)
         if callback_id:
-            await answer_callback_query(callback_id, "Доступ запрещен")
+            await answer_callback_query(callback_id, "Нет доступа")
         return
 
     parsed = parse_callback_data(str(data or ""))
@@ -199,12 +243,13 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
         return
 
     booking_id = int(parsed["booking_id"])
-    result = await db.execute(
-        select(Booking)
-        .where(Booking.id == booking_id)
-        .options(selectinload(Booking.service), selectinload(Booking.master), selectinload(Booking.master).selectinload(Master.services))
-    )
-    booking = result.scalar_one_or_none()
+    booking = (
+        await db.execute(
+            select(Booking)
+            .where(Booking.id == booking_id)
+            .options(selectinload(Booking.service), selectinload(Booking.master), selectinload(Booking.master).selectinload(Master.services))
+        )
+    ).scalar_one_or_none()
 
     if not booking:
         if callback_id:
@@ -212,9 +257,10 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
         return
 
     action = parsed["action"]
-    if action == "pick":
-        masters_result = await db.execute(select(Master).where(Master.is_active.is_(True)).order_by(Master.sort_order, Master.name))
-        masters = masters_result.scalars().all()
+    if action == "choose":
+        masters = (
+            await db.execute(select(Master).where(Master.is_active.is_(True)).order_by(Master.sort_order, Master.name))
+        ).scalars().all()
         await edit_message_text(
             chat_id=message.get("chat", {}).get("id"),
             message_id=message.get("message_id"),
@@ -225,7 +271,7 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
             await answer_callback_query(callback_id)
         return
 
-    if action == "set":
+    if action == "assign":
         master_id = int(parsed["master_id"])
         master = (await db.execute(select(Master).where(Master.id == master_id, Master.is_active.is_(True)))).scalar_one_or_none()
         if not master:
@@ -245,24 +291,26 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
             entity_id=booking.id,
             meta={"master_id": master.id, "master_name": master.name},
         )
-        text = _admin_update_text(booking, f"Мастер назначен: {master.name}", actor_name)
         await edit_message_text(
             chat_id=message.get("chat", {}).get("id"),
             message_id=message.get("message_id"),
-            text=text,
+            text=_admin_update_text(booking, f"Мастер назначен: {master.name}", actor_name),
             reply_markup=build_admin_inline_keyboard(booking.id),
         )
-        if booking.status == BookingStatus.confirmed and master.telegram_user_id:
-            await send_master_booking_notification(booking)
         if callback_id:
             await answer_callback_query(callback_id, "Мастер назначен")
         return
 
     if action == "confirm":
+        if booking.master_id is None:
+            if callback_id:
+                await answer_callback_query(callback_id, "Сначала назначьте мастера")
+            return
         if booking.status != BookingStatus.confirmed:
             booking.status = BookingStatus.confirmed
             booking.is_read = True
             await db.flush()
+
         await log_event(
             db,
             actor_type=AuditActorType.telegram,
@@ -272,17 +320,36 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
             entity_type="booking",
             entity_id=booking.id,
         )
-        text = _admin_update_text(booking, "Подтверждено", actor_name)
         await edit_message_text(
             chat_id=message.get("chat", {}).get("id"),
             message_id=message.get("message_id"),
-            text=text,
+            text=_admin_update_text(booking, "Подтверждено", actor_name),
             reply_markup=build_admin_inline_keyboard(booking.id),
         )
-        if booking.master and booking.master.telegram_user_id:
-            await send_master_booking_notification(booking)
-        elif booking.master_id:
-            await send_message(chat_id=message.get("chat", {}).get("id"), text=f"Booking #{booking.id}: мастер не привязан к TG")
+
+        tg_settings = await get_tg_notifications_settings(db)
+        if tg_settings.admin_chat_id:
+            try:
+                await send_message(
+                    chat_id=tg_settings.admin_chat_id,
+                    thread_id=tg_settings.thread_id,
+                    text=booking_admin_text(
+                        {
+                            "booking_id": booking.id,
+                            "master_name": booking.master.name if booking.master else "Не назначен",
+                        },
+                        template=tg_settings.template_booking_confirmed_admin,
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("tg_notify.booking_confirmed_admin failed booking_id=%s", booking.id)
+
+        sent_to_master = await send_master_booking_notification(db, booking.id)
+        if not sent_to_master:
+            await send_message(
+                chat_id=message.get("chat", {}).get("id"),
+                text=f"Booking #{booking.id}: у мастера не привязан Telegram, уведомление не отправлено",
+            )
 
         if callback_id:
             await answer_callback_query(callback_id, "Подтверждено")
@@ -302,15 +369,12 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
             entity_type="booking",
             entity_id=booking.id,
         )
-        text = _admin_update_text(booking, "Отменено", actor_name)
         await edit_message_text(
             chat_id=message.get("chat", {}).get("id"),
             message_id=message.get("message_id"),
-            text=text,
+            text=_admin_update_text(booking, "Отменено", actor_name),
             reply_markup=None,
         )
-        if booking.master and booking.master.telegram_user_id:
-            await send_master_booking_notification(booking, status_text="Отменена")
 
         if callback_id:
             await answer_callback_query(callback_id, "Отменено")

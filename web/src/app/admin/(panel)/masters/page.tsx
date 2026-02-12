@@ -45,6 +45,21 @@ async function unlinkTelegram(formData: FormData) {
   revalidatePath("/admin/masters");
 }
 
+async function updateTelegramUser(formData: FormData) {
+  "use server";
+  const id = Number(formData.get("id"));
+  const rawTelegramUserId = String(formData.get("telegram_user_id") || "").trim();
+  await adminFetchResponse(`/admin/masters/${id}`, {
+    currentPath: "/admin/masters",
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      telegram_user_id: rawTelegramUserId ? Number(rawTelegramUserId) : null
+    })
+  });
+  revalidatePath("/admin/masters");
+}
+
 export default async function AdminMastersPage() {
   const [masters, services] = await Promise.all([adminFetch<Master[]>("/admin/masters"), adminFetch<Service[]>("/admin/services")]);
 
@@ -77,9 +92,22 @@ export default async function AdminMastersPage() {
                 <p className="font-medium text-ink-900">{master.name}</p>
                 <p className="text-xs text-ink-500">{master.short_bio ?? "—"}</p>
                 <p className="mt-1 text-xs text-ink-600">TG: {master.telegram_user_id ? "привязан" : "не привязан"}</p>
+                <p className="text-xs text-ink-600">Chat ID: {master.telegram_chat_id ?? "—"}</p>
+                <p className="text-xs text-ink-600">Username: {master.telegram_username ?? "—"}</p>
                 {master.telegram_link_code ? (
                   <p className="text-xs text-ink-600">Код привязки: <span className="font-mono">{master.telegram_link_code}</span></p>
                 ) : null}
+                <form action={updateTelegramUser} className="mt-2 flex items-center gap-2">
+                  <input type="hidden" name="id" value={master.id} />
+                  <input
+                    name="telegram_user_id"
+                    type="number"
+                    defaultValue={master.telegram_user_id ?? ""}
+                    placeholder="telegram_user_id"
+                    className="rounded-xl border border-blush-100 px-2 py-1 text-xs"
+                  />
+                  <button className="rounded-full border border-blush-200 px-3 py-1 text-xs" type="submit">Сохранить TG user_id</button>
+                </form>
               </div>
               <div className="flex flex-wrap gap-2">
                 <form action={generateTelegramLink}>

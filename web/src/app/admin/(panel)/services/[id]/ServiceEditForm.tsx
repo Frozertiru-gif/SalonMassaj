@@ -47,14 +47,6 @@ export function ServiceEditForm({ service, categories }: ServiceEditFormProps) {
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-ink-700">Slug</label>
-            <input
-              name="slug"
-              defaultValue={service.slug}
-              className="mt-2 w-full rounded-2xl border border-blush-100 px-4 py-3"
-            />
-          </div>
-          <div>
             <label className="text-xs font-medium text-ink-700">Длительность (мин)</label>
             <input
               name="duration_min"

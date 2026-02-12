@@ -25,10 +25,6 @@ export function CategoriesClient({ categories }: CategoriesClientProps) {
             <input name="title" required className="mt-2 w-full rounded-2xl border border-blush-100 px-4 py-3" />
           </div>
           <div>
-            <label className="text-xs font-medium text-ink-700">Slug</label>
-            <input name="slug" required className="mt-2 w-full rounded-2xl border border-blush-100 px-4 py-3" />
-          </div>
-          <div>
             <label className="text-xs font-medium text-ink-700">Сортировка</label>
             <input name="sort_order" type="number" className="mt-2 w-full rounded-2xl border border-blush-100 px-4 py-3" />
           </div>
@@ -66,15 +62,6 @@ function CategoryRow({ category }: { category: ServiceCategory }) {
             name="title"
             required
             defaultValue={category.title}
-            className="mt-2 w-full rounded-2xl border border-blush-100 px-4 py-3"
-          />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-ink-700">Slug</label>
-          <input
-            name="slug"
-            required
-            defaultValue={category.slug}
             className="mt-2 w-full rounded-2xl border border-blush-100 px-4 py-3"
           />
         </div>

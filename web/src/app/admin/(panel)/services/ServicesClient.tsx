@@ -61,7 +61,6 @@ function ServiceRow({ service }: { service: Service }) {
     <Card className="flex flex-wrap items-center justify-between gap-4">
       <div>
         <p className="text-sm font-medium text-ink-900">{service.title}</p>
-        <p className="text-xs text-ink-500">{service.slug}</p>
       </div>
       <div className="text-sm text-ink-600">{service.duration_min} мин</div>
       <div className="text-sm text-ink-600">от {service.price_from} ₽</div>

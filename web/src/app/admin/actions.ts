@@ -283,11 +283,9 @@ export async function updateService(
   formData: FormData
 ): Promise<AdminFormState> {
     const id = Number(formData.get("id"));
-  const slugValue = formData.get("slug");
   const payload = {
     category_id: Number(formData.get("category_id")),
     title: formData.get("title"),
-    slug: slugValue ? String(slugValue) : undefined,
     short_description: formData.get("short_description"),
     description: formData.get("description"),
     duration_min: Number(formData.get("duration_min")),
@@ -343,7 +341,6 @@ export async function createWeeklyRitual(
 ): Promise<AdminFormState> {
     const payload = {
     title: formData.get("title"),
-    slug: formData.get("slug") || null,
     short_description: formData.get("short_description") || null,
     description: formData.get("description"),
     image_url: formData.get("image_url") || null,
@@ -375,10 +372,8 @@ export async function updateWeeklyRitual(
   formData: FormData
 ): Promise<AdminFormState> {
     const id = Number(formData.get("id"));
-  const slugValue = formData.get("slug");
   const payload = {
     title: formData.get("title"),
-    slug: slugValue ? String(slugValue) : undefined,
     short_description: formData.get("short_description") || null,
     description: formData.get("description"),
     image_url: formData.get("image_url") || null,

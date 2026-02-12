@@ -132,20 +132,11 @@ async def list_services(db: AsyncSession = Depends(get_db)):
 @router.post("/services", response_model=ServiceOut)
 async def create_service(payload: ServiceCreate, request: Request, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin)):
     payload_data = payload.model_dump()
-    raw_slug = payload.slug
-    base_slug = normalize_slug((raw_slug or payload.title) or "")
-    if not base_slug:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Slug cannot be empty")
-
+    base_slug = normalize_slug((payload.slug or payload.title) or "")
     existing_slugs = set(
         (await db.execute(select(Service.slug).where(Service.slug.like(f"{base_slug}%")))).scalars().all()
     )
-    if raw_slug:
-        if base_slug in existing_slugs:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists")
-        payload_data["slug"] = base_slug
-    else:
-        payload_data["slug"] = pick_unique_slug(base_slug, existing_slugs)
+    payload_data["slug"] = pick_unique_slug(base_slug, existing_slugs)
 
     try:
         service = Service(**payload_data)
@@ -167,14 +158,13 @@ async def update_service(service_id: int, payload: ServiceUpdate, request: Reque
     if not service:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     updates = payload.model_dump(exclude_unset=True)
-    if "slug" in updates and updates["slug"] is not None:
-        normalized = normalize_slug(updates["slug"])
-        if not normalized:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Slug cannot be empty")
-        exists = await db.execute(select(Service.id).where(Service.slug == normalized, Service.id != service_id))
-        if exists.scalar_one_or_none() is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Service with this slug already exists")
-        updates["slug"] = normalized
+    title_for_slug = updates.get("title") or updates.get("slug")
+    if title_for_slug:
+        base_slug = normalize_slug(title_for_slug)
+        existing_slugs = set(
+            (await db.execute(select(Service.slug).where(Service.slug.like(f"{base_slug}%"), Service.id != service_id))).scalars().all()
+        )
+        updates["slug"] = pick_unique_slug(base_slug, existing_slugs)
     for key, value in updates.items():
         setattr(service, key, value)
     try:
@@ -361,7 +351,13 @@ async def list_weekly_rituals(db: AsyncSession = Depends(get_db)):
 async def create_weekly_ritual(payload: WeeklyRitualCreate, db: AsyncSession = Depends(get_db)):
     if payload.start_date and payload.end_date and payload.start_date > payload.end_date:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start date cannot be after end date")
-    ritual = WeeklyRitual(**payload.model_dump())
+    payload_data = payload.model_dump()
+    base_slug = normalize_slug((payload.slug or payload.title) or "")
+    existing_slugs = set(
+        (await db.execute(select(WeeklyRitual.slug).where(WeeklyRitual.slug.like(f"{base_slug}%")))).scalars().all()
+    )
+    payload_data["slug"] = pick_unique_slug(base_slug, existing_slugs)
+    ritual = WeeklyRitual(**payload_data)
     db.add(ritual)
     try:
         await db.flush()
@@ -378,12 +374,13 @@ async def update_weekly_ritual(ritual_id: int, payload: WeeklyRitualUpdate, db: 
     if not ritual:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Weekly ritual not found")
     updates = payload.model_dump(exclude_unset=True)
-    if "slug" in updates and updates["slug"] is not None:
-        existing = await db.execute(
-            select(WeeklyRitual.id).where(WeeklyRitual.slug == updates["slug"], WeeklyRitual.id != ritual_id)
+    title_for_slug = updates.get("title") or updates.get("slug")
+    if title_for_slug:
+        base_slug = normalize_slug(title_for_slug)
+        existing_slugs = set(
+            (await db.execute(select(WeeklyRitual.slug).where(WeeklyRitual.slug.like(f"{base_slug}%"), WeeklyRitual.id != ritual_id))).scalars().all()
         )
-        if existing.scalar_one_or_none() is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Weekly ritual with this slug already exists")
+        updates["slug"] = pick_unique_slug(base_slug, existing_slugs)
     new_start = updates.get("start_date", ritual.start_date)
     new_end = updates.get("end_date", ritual.end_date)
     if new_start and new_end and new_start > new_end:

@@ -17,20 +17,3 @@ main {
 ::selection {
   @apply bg-blush-200 text-ink-900;
 }
-
-.headerBanner {
-  position: relative;
-  overflow: hidden;
-  background-image: url("/images/banner.svg");
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-}
-
-.headerBanner::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: rgba(255, 255, 255, 0.65);
-  z-index: 0;
-}

@@ -11,8 +11,8 @@ const navItems = [
 
 export function NavBar() {
   return (
-    <header className="fixed top-0 z-50 w-full border-b border-blush-100 bg-white/80 backdrop-blur-md">
-      <Container className="flex h-20 items-center justify-between">
+    <header className="headerBanner fixed top-0 z-50 w-full border-b border-blush-100 backdrop-blur-md">
+      <Container className="relative z-10 flex h-20 items-center justify-between">
         <Link href="/" className="flex items-center gap-2 text-lg font-semibold text-ink-900">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blush-100 text-blush-600">
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5">

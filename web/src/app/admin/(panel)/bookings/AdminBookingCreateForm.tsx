@@ -7,7 +7,13 @@ import { clientAdminFetch } from "@/lib/clientApi";
 
 const STATUS_OPTIONS = ["NEW", "CONFIRMED", "CANCELLED", "DONE"] as const;
 
-export function AdminBookingCreateForm({ services }: { services: Service[] }) {
+export function AdminBookingCreateForm({
+  services,
+  onSuccess
+}: {
+  services: Service[];
+  onSuccess?: () => void;
+}) {
   const router = useRouter();
   const [serviceId, setServiceId] = useState<string>("");
   const [date, setDate] = useState<string>("");
@@ -82,6 +88,7 @@ export function AdminBookingCreateForm({ services }: { services: Service[] }) {
       setSlots([]);
       setSlotsLoaded(false);
       router.refresh();
+      onSuccess?.();
     } catch {
       setError("Не удалось создать запись");
     } finally {

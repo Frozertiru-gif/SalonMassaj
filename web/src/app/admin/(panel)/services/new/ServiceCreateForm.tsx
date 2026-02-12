@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useFormState } from "react-dom";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -8,12 +9,27 @@ import { createService } from "../../../actions";
 
 const initialState = { error: undefined, success: undefined };
 
-export function ServiceCreateForm({ categories }: { categories: ServiceCategory[] }) {
+export function ServiceCreateForm({
+  categories,
+  onSuccess
+}: {
+  categories: ServiceCategory[];
+  onSuccess?: () => void;
+}) {
   const [createState, createAction] = useFormState(createService, initialState);
+  const formRef = useRef<HTMLFormElement | null>(null);
+
+  useEffect(() => {
+    if (!createState.success) {
+      return;
+    }
+    formRef.current?.reset();
+    onSuccess?.();
+  }, [createState.success, onSuccess]);
 
   return (
     <Card>
-      <form action={createAction} className="grid gap-4 md:grid-cols-2">
+      <form ref={formRef} action={createAction} className="grid gap-4 md:grid-cols-2">
         <div>
           <label className="text-xs font-medium text-ink-700">Категория</label>
           <select name="category_id" className="mt-2 w-full rounded-2xl border border-blush-100 px-4 py-3 text-sm">

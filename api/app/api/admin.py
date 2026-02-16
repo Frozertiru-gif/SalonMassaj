@@ -1,7 +1,7 @@
 import logging
 import re
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import or_, select
@@ -689,6 +689,14 @@ async def create_booking(payload: BookingAdminCreate, request: Request, db: Asyn
     return booking_out
 
 
+def _booking_bad_request(booking_id: int, reason: str, message: str) -> None:
+    logger.info("booking.update rejected booking_id=%s reason=%s", booking_id, reason)
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={"code": reason, "message": message},
+    )
+
+
 @router.patch("/bookings/{booking_id}", response_model=BookingOut)
 async def update_booking(booking_id: int, payload: BookingUpdate, request: Request, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin)):
     result = await db.execute(
@@ -702,22 +710,34 @@ async def update_booking(booking_id: int, payload: BookingUpdate, request: Reque
 
     old_status = booking.status
     old_starts_at = booking.starts_at
+    old_ends_at = booking.ends_at
     updates = payload.model_dump(exclude_unset=True)
 
     if "status" in updates and updates["status"] is not None:
         try:
             updates["status"] = BookingStatus(updates["status"])
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status") from exc
+        except ValueError:
+            _booking_bad_request(
+                booking_id,
+                reason="invalid_status",
+                message="status must be one of: NEW, CONFIRMED, CANCELLED, DONE",
+            )
 
     target_master_id = updates.get("master_id", booking.master_id)
     if "master_id" in updates and updates["master_id"] is not None:
         master = (await db.execute(select(Master).where(Master.id == updates["master_id"]))).scalar_one_or_none()
         if not master or not master.is_active:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid master")
+            _booking_bad_request(booking_id, reason="invalid_master", message="master_id is invalid or inactive")
 
-    if "starts_at" in updates and updates["starts_at"] is not None:
-        requested_start = updates["starts_at"].replace(tzinfo=None, second=0, microsecond=0)
+    provided_starts_at = updates.get("starts_at")
+    provided_ends_at = updates.get("ends_at")
+    provided_duration_min = updates.pop("duration_min", None)
+
+    if provided_starts_at is not None:
+        requested_start = provided_starts_at.replace(tzinfo=None, second=0, microsecond=0)
+        if provided_duration_min is not None and provided_duration_min <= 0:
+            _booking_bad_request(booking_id, reason="invalid_duration", message="duration_min must be greater than zero")
+
         slot_start, slot_end = await resolve_available_slot(
             db,
             booking.service_id,
@@ -726,15 +746,27 @@ async def update_booking(booking_id: int, payload: BookingUpdate, request: Reque
             master_id=target_master_id,
         )
         updates["starts_at"] = slot_start
-        updates["ends_at"] = slot_end
+
+        if provided_ends_at is not None:
+            normalized_end = provided_ends_at.replace(tzinfo=None, second=0, microsecond=0)
+            if normalized_end <= slot_start:
+                _booking_bad_request(booking_id, reason="invalid_ends_at", message="ends_at must be greater than starts_at")
+            updates["ends_at"] = normalized_end
+        elif provided_duration_min is not None:
+            updates["ends_at"] = slot_start + timedelta(minutes=provided_duration_min)
+        else:
+            updates["ends_at"] = slot_end
+    elif provided_ends_at is not None:
+        _booking_bad_request(booking_id, reason="starts_at_required", message="starts_at is required when ends_at is provided")
 
     target_status = updates.get("status", booking.status)
     if target_status == BookingStatus.done:
         final_price_cents = updates.get("final_price_cents", booking.final_price_cents)
         if final_price_cents is None or final_price_cents <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="final_price is required when closing booking",
+            _booking_bad_request(
+                booking_id,
+                reason="final_price_required",
+                message="final_price is required when closing booking",
             )
 
     for key, value in updates.items():
@@ -749,7 +781,7 @@ async def update_booking(booking_id: int, payload: BookingUpdate, request: Reque
     updated_booking = result.scalar_one()
 
     status_changed_to_confirmed = old_status != BookingStatus.confirmed and updated_booking.status == BookingStatus.confirmed
-    datetime_changed = old_starts_at != updated_booking.starts_at
+    datetime_changed = old_starts_at != updated_booking.starts_at or old_ends_at != updated_booking.ends_at
 
     if status_changed_to_confirmed:
         await send_master_booking_confirmed(db, updated_booking)

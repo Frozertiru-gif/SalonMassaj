@@ -14,8 +14,8 @@ function formatPrice(cents?: number | null) {
 const STATUS_LABELS: Record<string, string> = {
   NEW: "Новая",
   CONFIRMED: "Подтверждено",
-  CANCELLED: "Отменена",
-  DONE: "Завершена"
+  CANCELLED: "Отменено",
+  DONE: "Завершено"
 };
 
 const TABS = [
@@ -61,8 +61,10 @@ async function updateAction(formData: FormData) {
     payload.starts_at = startsAt;
   }
 
-  if (finalPriceRub) {
-    payload.final_price_cents = Number(finalPriceRub) * 100;
+  if (finalPriceRub === "") {
+    payload.final_price_cents = null;
+  } else if (finalPriceRub) {
+    payload.final_price_cents = Math.round(Number(finalPriceRub) * 100);
   }
 
   await updateBookingAdmin(payload);
@@ -153,7 +155,7 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
             <form action={updateAction} className="grid gap-2 md:grid-cols-4">
               <input type="hidden" name="id" value={booking.id} />
               <select name="status" defaultValue={booking.status} className="rounded-full border border-blush-100 px-3 py-2 text-sm">
-                <option value="NEW">Новая</option><option value="CONFIRMED">Подтверждено</option><option value="CANCELLED">Отменена</option><option value="DONE">Завершена</option>
+                <option value="NEW">Новая</option><option value="CONFIRMED">Подтверждено</option><option value="CANCELLED">Отменено</option><option value="DONE">Завершено</option>
               </select>
               <select name="master_id" defaultValue={booking.master?.id ?? ""} className="rounded-full border border-blush-100 px-3 py-2 text-sm">
                 <option value="">Не назначен</option>
@@ -175,7 +177,7 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
                 placeholder="Фактическая стоимость, ₽"
                 className="rounded-full border border-blush-100 px-3 py-2 text-sm"
               />
-              <button type="submit" className="rounded-full bg-blush-100 px-4 py-2 text-sm">Сохранить</button>
+              <button type="submit" className="rounded-full bg-blush-100 px-4 py-2 text-sm">Сохранить / перенести запись</button>
               <textarea name="admin_comment" defaultValue={booking.admin_comment ?? ""} placeholder="Комментарий админа" className="md:col-span-4 rounded-2xl border border-blush-100 px-3 py-2 text-sm" />
             </form>
           </Card>

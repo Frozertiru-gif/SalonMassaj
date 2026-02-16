@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -114,24 +115,49 @@ async def _telegram_api(method: str, payload: dict[str, Any], timeout_override: 
         raise TelegramError("TELEGRAM_BOT_TOKEN is not set")
 
     timeout = _build_telegram_timeout(method=method, payload=payload, timeout_override=timeout_override)
+    retries = 2
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(
-            f"https://api.telegram.org/bot{token}/{method}",
-            json=payload,
-        )
+    for attempt in range(1, retries + 2):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(
+                    f"https://api.telegram.org/bot{token}/{method}",
+                    json=payload,
+                )
+        except httpx.HTTPError as exc:
+            if attempt > retries:
+                logger.warning("Telegram API request failed: method=%s attempt=%s error=%s", method, attempt, exc.__class__.__name__)
+                raise TelegramError("Telegram API request failed") from exc
+            logger.warning("Telegram API temporary failure: method=%s attempt=%s error=%s", method, attempt, exc.__class__.__name__)
+            await asyncio.sleep(0.4 * attempt)
+            continue
 
-    short_text = _short_response_text(response.text)
+        short_text = _short_response_text(response.text)
 
-    if not response.is_success:
-        logger.error("Telegram API request failed: method=%s status=%s body=%s", method, response.status_code, short_text)
-        raise TelegramError(f"Telegram API request failed with status {response.status_code}")
+        if response.status_code in {429, 500, 502, 503, 504} and attempt <= retries:
+            logger.warning(
+                "Telegram API temporary status: method=%s attempt=%s status=%s body=%s",
+                method,
+                attempt,
+                response.status_code,
+                short_text,
+            )
+            await asyncio.sleep(0.4 * attempt)
+            continue
 
-    data = response.json()
-    if not data.get("ok"):
-        logger.error("Telegram API error response: method=%s status=%s body=%s", method, response.status_code, short_text)
-        raise TelegramError(data.get("description") or "Telegram API returned non-ok response")
-    return data
+        if not response.is_success:
+            logger.warning("Telegram API request failed: method=%s status=%s body=%s", method, response.status_code, short_text)
+            raise TelegramError(f"Telegram API request failed with status {response.status_code}")
+
+        data = response.json()
+        if not data.get("ok"):
+            logger.warning("Telegram API error response: method=%s status=%s body=%s", method, response.status_code, short_text)
+            raise TelegramError(data.get("description") or "Telegram API returned non-ok response")
+
+        logger.info("Telegram API request succeeded: method=%s", method)
+        return data
+
+    raise TelegramError("Telegram API request exhausted retries")
 
 
 async def get_webhook_info() -> dict[str, Any]:

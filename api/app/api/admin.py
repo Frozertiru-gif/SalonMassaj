@@ -25,7 +25,7 @@ from app.services.telegram import (
     send_message,
     set_webhook,
 )
-from app.utils import DEFAULT_SLOT_STEP_MIN, get_availability_slots, get_setting, parse_date_param
+from app.utils import DEFAULT_SLOT_STEP_MIN, get_availability_slots, get_setting as get_setting_value, parse_date_param
 from app.schemas import (
     AuditLogOut,
     BookingAdminCreate,
@@ -73,7 +73,7 @@ def _source_label(value: str | None) -> str:
 
 
 async def _slot_step_min(db: AsyncSession) -> int:
-    slot_step_min_setting = await get_setting(db, "slot_step_min")
+    slot_step_min_setting = await get_setting_value(db, "slot_step_min")
     if isinstance(slot_step_min_setting, dict):
         raw_value = slot_step_min_setting.get("value", DEFAULT_SLOT_STEP_MIN)
     else:
@@ -486,7 +486,7 @@ async def delete_review(review_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/settings/{key}", response_model=SettingOut)
-async def get_setting(key: str, db: AsyncSession = Depends(get_db)):
+async def get_setting_item(key: str, db: AsyncSession = Depends(get_db)):
     if key not in {"business_hours", "slot_step_min", "booking_rules", "contacts", "tg_notifications", "tg_admins", "tg_mode"}:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Setting not found")
     result = await db.execute(select(Setting).where(Setting.key == key))

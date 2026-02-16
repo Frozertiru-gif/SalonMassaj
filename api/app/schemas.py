@@ -400,6 +400,7 @@ class AdminScheduleBookingOut(BaseModel):
     status: str
     client_name: str
     client_phone: str
+    comment: str | None = None
     source: str
 
 

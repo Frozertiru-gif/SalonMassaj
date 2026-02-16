@@ -2,8 +2,8 @@ import { adminFetch } from "@/lib/api";
 import type { Booking, Master, Service } from "@/lib/types";
 import { Card } from "@/components/Card";
 import { Container } from "@/components/Container";
-import { updateBookingAdmin } from "../../actions";
 import { BookingsCreateSection } from "./BookingsCreateSection";
+import { BookingUpdateForm } from "./BookingUpdateForm";
 
 
 function formatPrice(cents?: number | null) {
@@ -25,13 +25,6 @@ const TABS = [
   { key: "all", label: "Все" }
 ] as const;
 
-function formatDateTimeLocal(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const pad = (num: number) => String(num).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 function buildBookingsPath(searchParams: Record<string, string | undefined>) {
   const params = new URLSearchParams();
   if (searchParams.status) params.set("status", searchParams.status);
@@ -43,31 +36,6 @@ function buildBookingsPath(searchParams: Record<string, string | undefined>) {
   if (searchParams.q) params.set("q", searchParams.q);
   const q = params.toString();
   return q ? `/admin/bookings?${q}` : "/admin/bookings";
-}
-
-async function updateAction(formData: FormData) {
-  "use server";
-  const finalPriceRub = (formData.get("final_price_rub") as string | null)?.trim();
-  const payload: Parameters<typeof updateBookingAdmin>[0] = {
-    id: Number(formData.get("id")),
-    status: String(formData.get("status")),
-    is_read: formData.get("is_read") === "on",
-    master_id: formData.get("master_id") ? Number(formData.get("master_id")) : null,
-    admin_comment: (formData.get("admin_comment") as string) || null
-  };
-
-  const startsAt = (formData.get("starts_at") as string | null)?.trim();
-  if (startsAt) {
-    payload.starts_at = startsAt;
-  }
-
-  if (finalPriceRub === "") {
-    payload.final_price_cents = null;
-  } else if (finalPriceRub) {
-    payload.final_price_cents = Math.round(Number(finalPriceRub) * 100);
-  }
-
-  await updateBookingAdmin(payload);
 }
 
 export default async function AdminBookingsPage({ searchParams }: { searchParams: Record<string, string | undefined> }) {
@@ -152,34 +120,7 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
               <p className="text-xs font-semibold uppercase tracking-[0.15em] text-ink-500">Комментарий клиента</p>
               <p className="mt-1 text-sm text-ink-900">{booking.comment?.trim() ? booking.comment : "—"}</p>
             </div>
-            <form action={updateAction} className="grid gap-2 md:grid-cols-4">
-              <input type="hidden" name="id" value={booking.id} />
-              <select name="status" defaultValue={booking.status} className="rounded-full border border-blush-100 px-3 py-2 text-sm">
-                <option value="NEW">Новая</option><option value="CONFIRMED">Подтверждено</option><option value="CANCELLED">Отменено</option><option value="DONE">Завершено</option>
-              </select>
-              <select name="master_id" defaultValue={booking.master?.id ?? ""} className="rounded-full border border-blush-100 px-3 py-2 text-sm">
-                <option value="">Не назначен</option>
-                {masters.map((master) => <option key={master.id} value={master.id}>{master.name}</option>)}
-              </select>
-              <input
-                name="starts_at"
-                type="datetime-local"
-                defaultValue={formatDateTimeLocal(booking.starts_at)}
-                className="rounded-full border border-blush-100 px-3 py-2 text-sm"
-              />
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="is_read" defaultChecked={booking.is_read} />Прочитано</label>
-              <input
-                name="final_price_rub"
-                type="number"
-                min="0"
-                step="1"
-                defaultValue={booking.final_price_cents != null ? String(booking.final_price_cents / 100) : ""}
-                placeholder="Фактическая стоимость, ₽"
-                className="rounded-full border border-blush-100 px-3 py-2 text-sm"
-              />
-              <button type="submit" className="rounded-full bg-blush-100 px-4 py-2 text-sm">Сохранить / перенести запись</button>
-              <textarea name="admin_comment" defaultValue={booking.admin_comment ?? ""} placeholder="Комментарий админа" className="md:col-span-4 rounded-2xl border border-blush-100 px-3 py-2 text-sm" />
-            </form>
+            <BookingUpdateForm booking={booking} masters={masters} />
           </Card>
         ))}
       </div>

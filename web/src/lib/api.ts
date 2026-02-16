@@ -77,7 +77,7 @@ export async function adminFetchResponse(path: string, init?: AdminFetchInit): P
       throw new ServiceUnavailableError();
     }
 
-    const data = await response.json().catch(() => null);
+    const data = await response.clone().json().catch(() => null);
     const detail = getAuthErrorDetail(data);
     if (isAuthDetail(detail)) {
       redirectToAdminLogin(currentPath);

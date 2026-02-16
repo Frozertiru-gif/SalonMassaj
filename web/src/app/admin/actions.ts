@@ -17,6 +17,18 @@ function mapAdminErrorDetail(detail?: unknown) {
   if (!detail) {
     return undefined;
   }
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => (typeof item === "object" && item !== null && "msg" in item
+        ? String((item as { msg?: unknown }).msg ?? "")
+        : ""))
+      .filter(Boolean);
+    if (messages.length > 0) {
+      return messages.join("; ");
+    }
+  }
+
   const message = typeof detail === "string"
     ? detail
     : typeof detail === "object" && detail !== null && "message" in detail
@@ -29,6 +41,31 @@ function mapAdminErrorDetail(detail?: unknown) {
     return SESSION_EXPIRED_MESSAGE;
   }
   return message;
+}
+
+function truncateErrorText(value: string, maxLength = 1000): string {
+  const text = value.trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength)}…`;
+}
+
+async function parseResponseError(response: Response): Promise<{ detail?: unknown; text?: string }> {
+  const rawText = await response.text().catch(() => "");
+  const normalizedText = rawText.trim();
+
+  if (!normalizedText) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(normalizedText) as { detail?: unknown };
+    return { detail: parsed?.detail };
+  } catch {
+    return { text: truncateErrorText(normalizedText) };
+  }
 }
 
 export async function loginAdmin(_: LoginAdminState, formData: FormData): Promise<LoginAdminState> {
@@ -508,19 +545,87 @@ export async function deleteReview(
 }
 
 
-export async function updateBookingAdmin(payload: { id: number; status?: string; is_read?: boolean; master_id?: number | null; starts_at?: string; ends_at?: string; duration_min?: number; admin_comment?: string | null; final_price_cents?: number | null | string }) {
-    const response = await adminActionFetch(`/admin/bookings/${payload.id}`, {
+export type UpdateBookingPayload = {
+  id: number;
+  status?: string;
+  is_read?: boolean;
+  master_id?: number | null;
+  starts_at?: string;
+  ends_at?: string;
+  duration_min?: number;
+  admin_comment?: string | null;
+  final_price_cents?: number | null;
+};
+
+export async function updateBookingAdmin(payload: UpdateBookingPayload) {
+  const { id, ...patch } = payload;
+  const response = await adminActionFetch(`/admin/bookings/${id}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(patch)
   });
   if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(mapAdminErrorDetail(data?.detail) || "Failed to update booking");
+    const errorPayload = await parseResponseError(response);
+    const message = mapAdminErrorDetail(errorPayload.detail)
+      || errorPayload.text
+      || (response.status >= 500 ? "Сервис временно недоступен" : "Не удалось обновить заявку");
+    throw new Error(message);
   }
   revalidatePath("/admin/bookings");
   revalidatePath("/admin");
+}
+
+export type UpdateBookingActionState = { ok: boolean; error?: string };
+
+export async function updateBookingAdminFormAction(
+  _prevState: UpdateBookingActionState,
+  formData: FormData
+): Promise<UpdateBookingActionState> {
+  const status = String(formData.get("status") ?? "");
+  const finalPriceRub = (formData.get("final_price_rub") as string | null)?.trim() ?? "";
+
+  if (status === "DONE") {
+    const finalPriceNumber = Number(finalPriceRub);
+    if (!finalPriceRub || Number.isNaN(finalPriceNumber) || finalPriceNumber <= 0) {
+      return { ok: false, error: "Укажите финальную цену" };
+    }
+  }
+
+  const payload: UpdateBookingPayload = {
+    id: Number(formData.get("id")),
+    status,
+    is_read: formData.get("is_read") === "on",
+    master_id: formData.get("master_id") ? Number(formData.get("master_id")) : null,
+    admin_comment: ((formData.get("admin_comment") as string | null) || "").trim() || null
+  };
+
+  const startsAt = (formData.get("starts_at") as string | null)?.trim();
+  if (startsAt) {
+    payload.starts_at = startsAt;
+  }
+
+  if (status === "DONE") {
+    payload.final_price_cents = Math.round(Number(finalPriceRub) * 100);
+  } else if (finalPriceRub === "") {
+    payload.final_price_cents = null;
+  } else {
+    const parsedPrice = Number(finalPriceRub);
+    if (Number.isNaN(parsedPrice)) {
+      return { ok: false, error: "Укажите корректную финальную цену" };
+    }
+    payload.final_price_cents = Math.round(parsedPrice * 100);
+  }
+
+  try {
+    await updateBookingAdmin(payload);
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error && error.message
+      ? error.message
+      : "Сервис временно недоступен";
+    return { ok: false, error: message };
+  }
 }

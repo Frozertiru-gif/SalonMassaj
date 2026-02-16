@@ -20,6 +20,8 @@ from app.services.telegram import (
     get_tg_notifications_settings,
     get_webhook_info,
     normalize_tg_notifications,
+    send_master_booking_confirmed,
+    send_master_booking_rescheduled,
     send_message,
     set_webhook,
 )
@@ -697,12 +699,34 @@ async def update_booking(booking_id: int, payload: BookingUpdate, request: Reque
     booking = result.scalar_one_or_none()
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+
+    old_status = booking.status
+    old_starts_at = booking.starts_at
     updates = payload.model_dump(exclude_unset=True)
+
     if "status" in updates and updates["status"] is not None:
         try:
             updates["status"] = BookingStatus(updates["status"])
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status") from exc
+
+    target_master_id = updates.get("master_id", booking.master_id)
+    if "master_id" in updates and updates["master_id"] is not None:
+        master = (await db.execute(select(Master).where(Master.id == updates["master_id"]))).scalar_one_or_none()
+        if not master or not master.is_active:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid master")
+
+    if "starts_at" in updates and updates["starts_at"] is not None:
+        requested_start = updates["starts_at"].replace(tzinfo=None, second=0, microsecond=0)
+        slot_start, slot_end = await resolve_available_slot(
+            db,
+            booking.service_id,
+            requested_start,
+            datetime.now(),
+            master_id=target_master_id,
+        )
+        updates["starts_at"] = slot_start
+        updates["ends_at"] = slot_end
 
     target_status = updates.get("status", booking.status)
     if target_status == BookingStatus.done:
@@ -713,19 +737,26 @@ async def update_booking(booking_id: int, payload: BookingUpdate, request: Reque
                 detail="final_price is required when closing booking",
             )
 
-    if "master_id" in updates and updates["master_id"] is not None:
-        master = (await db.execute(select(Master).where(Master.id == updates["master_id"]))).scalar_one_or_none()
-        if not master or not master.is_active:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid master")
     for key, value in updates.items():
         setattr(booking, key, value)
     await db.flush()
+
     result = await db.execute(
         select(Booking)
         .where(Booking.id == booking_id)
         .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category), selectinload(Booking.master).selectinload(Master.services))
     )
     updated_booking = result.scalar_one()
+
+    status_changed_to_confirmed = old_status != BookingStatus.confirmed and updated_booking.status == BookingStatus.confirmed
+    datetime_changed = old_starts_at != updated_booking.starts_at
+
+    if status_changed_to_confirmed:
+        await send_master_booking_confirmed(db, updated_booking)
+
+    if datetime_changed:
+        await send_master_booking_rescheduled(db, updated_booking, old_starts_at)
+
     ip, user_agent = _request_context(request)
     await log_event(db, actor_type=AuditActorType.web, actor_admin=admin, action="booking.update", entity_type="booking", entity_id=updated_booking.id, meta={"fields": list(updates.keys())}, ip=ip, user_agent=user_agent)
     return updated_booking

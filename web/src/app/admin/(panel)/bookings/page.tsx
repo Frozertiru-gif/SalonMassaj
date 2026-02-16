@@ -11,12 +11,26 @@ function formatPrice(cents?: number | null) {
   return `${(cents / 100).toLocaleString("ru-RU")} ₽`;
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  NEW: "Новая",
+  CONFIRMED: "Подтверждено",
+  CANCELLED: "Отменена",
+  DONE: "Завершена"
+};
+
 const TABS = [
   { key: "new", label: "Новые" },
   { key: "active", label: "Активные" },
   { key: "completed", label: "Завершенные" },
   { key: "all", label: "Все" }
 ] as const;
+
+function formatDateTimeLocal(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (num: number) => String(num).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 function buildBookingsPath(searchParams: Record<string, string | undefined>) {
   const params = new URLSearchParams();
@@ -41,6 +55,11 @@ async function updateAction(formData: FormData) {
     master_id: formData.get("master_id") ? Number(formData.get("master_id")) : null,
     admin_comment: (formData.get("admin_comment") as string) || null
   };
+
+  const startsAt = (formData.get("starts_at") as string | null)?.trim();
+  if (startsAt) {
+    payload.starts_at = startsAt;
+  }
 
   if (finalPriceRub) {
     payload.final_price_cents = Number(finalPriceRub) * 100;
@@ -120,7 +139,7 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
               </div>
               <div>
                 <p>Мастер: {booking.master?.name ?? "Не назначен"}</p>
-                <p className="text-xs uppercase tracking-[0.2em] text-blush-600">{booking.status}</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-blush-600">{STATUS_LABELS[booking.status] ?? booking.status}</p>
               </div>
               <div>
                 <p className="font-medium text-ink-900">{formatPrice(booking.final_price_cents)}</p>
@@ -134,12 +153,18 @@ export default async function AdminBookingsPage({ searchParams }: { searchParams
             <form action={updateAction} className="grid gap-2 md:grid-cols-4">
               <input type="hidden" name="id" value={booking.id} />
               <select name="status" defaultValue={booking.status} className="rounded-full border border-blush-100 px-3 py-2 text-sm">
-                <option value="NEW">NEW</option><option value="CONFIRMED">CONFIRMED</option><option value="CANCELLED">CANCELLED</option><option value="DONE">DONE</option>
+                <option value="NEW">Новая</option><option value="CONFIRMED">Подтверждено</option><option value="CANCELLED">Отменена</option><option value="DONE">Завершена</option>
               </select>
               <select name="master_id" defaultValue={booking.master?.id ?? ""} className="rounded-full border border-blush-100 px-3 py-2 text-sm">
                 <option value="">Не назначен</option>
                 {masters.map((master) => <option key={master.id} value={master.id}>{master.name}</option>)}
               </select>
+              <input
+                name="starts_at"
+                type="datetime-local"
+                defaultValue={formatDateTimeLocal(booking.starts_at)}
+                className="rounded-full border border-blush-100 px-3 py-2 text-sm"
+              />
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="is_read" defaultChecked={booking.is_read} />Прочитано</label>
               <input
                 name="final_price_rub"

@@ -327,6 +327,7 @@ class BookingUpdate(BaseModel):
     status: str | None = None
     is_read: bool | None = None
     master_id: int | None = None
+    starts_at: datetime | None = None
     admin_comment: str | None = None
     final_price_cents: int | None = Field(default=None, ge=0)
 

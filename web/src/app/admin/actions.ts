@@ -500,7 +500,7 @@ export async function deleteReview(
 }
 
 
-export async function updateBookingAdmin(payload: { id: number; status?: string; is_read?: boolean; master_id?: number | null; admin_comment?: string | null; final_price_cents?: number | null }) {
+export async function updateBookingAdmin(payload: { id: number; status?: string; is_read?: boolean; master_id?: number | null; starts_at?: string; admin_comment?: string | null; final_price_cents?: number | null }) {
     const response = await adminActionFetch(`/admin/bookings/${payload.id}`, {
     method: "PATCH",
     headers: {

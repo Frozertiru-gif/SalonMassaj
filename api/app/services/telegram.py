@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -315,6 +315,90 @@ async def send_master_booking_notification(db: AsyncSession, booking_id: int) ->
 
     message_id = ((result or {}).get("result") or {}).get("message_id")
     logger.info("tg_notify.booking_master sent booking_id=%s master_id=%s message_id=%s", booking_id, booking.master.id, message_id)
+    return True
+
+
+def _master_booking_human_fields(booking: Booking) -> dict[str, str]:
+    service_title = booking.service.title if booking.service else f"Услуга #{booking.service_id}"
+    return {
+        "starts_at": booking_time_human(booking.starts_at),
+        "service_title": service_title,
+        "client_name": booking.client_name or "—",
+        "client_phone": booking.client_phone or "—",
+        "comment": booking.comment.strip() if booking.comment and booking.comment.strip() else "—",
+    }
+
+
+async def send_master_booking_confirmed(db: AsyncSession, booking: Booking) -> bool:
+    master = booking.master
+    if booking.master_id is None:
+        logger.info("tg_notify.master_confirmed skip reason=no_master booking_id=%s", booking.id)
+        return False
+    if master is None:
+        master = (await db.execute(select(Master).where(Master.id == booking.master_id))).scalar_one_or_none()
+    if not master:
+        logger.warning("tg_notify.master_confirmed skip reason=master_not_found booking_id=%s master_id=%s", booking.id, booking.master_id)
+        return False
+    if not master.telegram_chat_id:
+        logger.info("tg_notify.master_confirmed skip reason=no_master_chat_id booking_id=%s master_id=%s", booking.id, master.id)
+        return False
+    if not settings.telegram_bot_token:
+        logger.warning("tg_notify.master_confirmed skip reason=no_token booking_id=%s master_id=%s", booking.id, master.id)
+        return False
+
+    payload = _master_booking_human_fields(booking)
+    text = (
+        "✅ Подтверждена запись\n"
+        f"Дата и время: {payload['starts_at']}\n"
+        f"Услуга: {payload['service_title']}\n"
+        f"Клиент: {payload['client_name']} ({payload['client_phone']})\n"
+        f"Комментарий: {payload['comment']}"
+    )
+    try:
+        result = await send_message(chat_id=master.telegram_chat_id, text=text)
+    except Exception:
+        logger.exception("tg_notify.master_confirmed fail booking_id=%s master_id=%s", booking.id, master.id)
+        return False
+
+    message_id = ((result or {}).get("result") or {}).get("message_id")
+    logger.info("tg_notify.master_confirmed sent booking_id=%s master_id=%s message_id=%s", booking.id, master.id, message_id)
+    return True
+
+
+async def send_master_booking_rescheduled(db: AsyncSession, booking: Booking, old_starts_at: datetime) -> bool:
+    master = booking.master
+    if booking.master_id is None:
+        logger.info("tg_notify.master_rescheduled skip reason=no_master booking_id=%s", booking.id)
+        return False
+    if master is None:
+        master = (await db.execute(select(Master).where(Master.id == booking.master_id))).scalar_one_or_none()
+    if not master:
+        logger.warning("tg_notify.master_rescheduled skip reason=master_not_found booking_id=%s master_id=%s", booking.id, booking.master_id)
+        return False
+    if not master.telegram_chat_id:
+        logger.info("tg_notify.master_rescheduled skip reason=no_master_chat_id booking_id=%s master_id=%s", booking.id, master.id)
+        return False
+    if not settings.telegram_bot_token:
+        logger.warning("tg_notify.master_rescheduled skip reason=no_token booking_id=%s master_id=%s", booking.id, master.id)
+        return False
+
+    payload = _master_booking_human_fields(booking)
+    text = (
+        "⏰ Перенос записи\n"
+        f"Было: {booking_time_human(old_starts_at)}\n"
+        f"Стало: {payload['starts_at']}\n"
+        f"Услуга: {payload['service_title']}\n"
+        f"Клиент: {payload['client_name']} ({payload['client_phone']})\n"
+        f"Комментарий: {payload['comment']}"
+    )
+    try:
+        result = await send_message(chat_id=master.telegram_chat_id, text=text)
+    except Exception:
+        logger.exception("tg_notify.master_rescheduled fail booking_id=%s master_id=%s", booking.id, master.id)
+        return False
+
+    message_id = ((result or {}).get("result") or {}).get("message_id")
+    logger.info("tg_notify.master_rescheduled sent booking_id=%s master_id=%s message_id=%s", booking.id, master.id, message_id)
     return True
 
 

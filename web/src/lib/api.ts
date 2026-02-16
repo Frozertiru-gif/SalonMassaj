@@ -102,7 +102,7 @@ export async function adminFetchResponse(path: string, init?: AdminFetchInit): P
     throw new ServiceUnavailableError();
   }
 
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     redirectToAdminLogin(currentPath);
   }
 
@@ -111,7 +111,7 @@ export async function adminFetchResponse(path: string, init?: AdminFetchInit): P
       throw new ServiceUnavailableError();
     }
 
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       const data = await response.clone().json().catch(() => null);
       const detail = getAuthErrorDetail(data);
       if (isAuthDetail(detail)) {

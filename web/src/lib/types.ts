@@ -5,6 +5,10 @@ export type AdminProfile = {
   is_active: boolean;
 };
 
+export type CurrentAdmin = {
+  role: "ADMIN" | "SYS_ADMIN";
+};
+
 export type AuditLog = {
   id: number;
   created_at: string;

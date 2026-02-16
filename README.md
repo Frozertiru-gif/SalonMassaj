@@ -81,6 +81,8 @@ npm run dev
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD`
 - `SEED_ADMIN`
+- `SYS_ADMIN_TOKENS` (или `SYS_ADMIN_API_KEYS`)
+- `ADMIN_TOKENS` (или `ADMIN_API_KEYS`)
 
 ### `/web/.env.local` (локальный запуск)
 
@@ -99,6 +101,7 @@ npm run dev
 - `LOG_LEVEL` (`INFO` для подробных логов Telegram)
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `SEED_ADMIN` (dev seed администратора)
+- `SYS_ADMIN_TOKENS`, `ADMIN_TOKENS` (доступ в web-админку по токенам/ключам)
 
 ## Админка
 
@@ -114,6 +117,12 @@ Dev-вход:
 Роли:
 - `ADMIN` — стандартная админка.
 - `SYS_ADMIN` — все права `ADMIN` + вкладка `Логи` (`/admin/logs`) и доступ к `GET /admin/logs`.
+
+Роль для токена админки задаётся только через ENV:
+- `SYS_ADMIN_TOKENS=token1,token2`
+- `ADMIN_TOKENS=token3,token4`
+
+Если один и тот же токен случайно указан в обоих списках, API пишет warning и считает его `SYS_ADMIN`.
 
 Возможности:
 - управление услугами (включая скидки) и категориями

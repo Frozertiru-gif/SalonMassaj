@@ -1,10 +1,11 @@
 import { adminFetch } from "@/lib/api";
-import type { AdminProfile, AuditLog } from "@/lib/types";
+import type { AuditLog } from "@/lib/types";
+import { getCurrentAdmin } from "../../adminApi";
 
 export default async function AdminLogsPage() {
-  const me = await adminFetch<AdminProfile>("/admin/auth/me");
+  const me = await getCurrentAdmin();
   if (me.role !== "SYS_ADMIN") {
-    return <p className="mx-auto max-w-5xl px-6 text-sm text-red-600">Недостаточно прав для просмотра логов.</p>;
+    return <p className="mx-auto max-w-5xl px-6 text-sm text-red-600">Нет доступа.</p>;
   }
 
   const logs = await adminFetch<AuditLog[]>("/admin/logs?limit=200&offset=0");

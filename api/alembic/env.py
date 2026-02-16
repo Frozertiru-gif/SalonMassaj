@@ -1,7 +1,8 @@
 from logging.config import fileConfig
+import logging
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 
 from app.core.config import settings
 from app.models import Base
@@ -13,6 +14,38 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+logger = logging.getLogger(__name__)
+
+
+def _ensure_alembic_version_column_length(connection) -> None:
+    column_info = connection.execute(
+        text(
+            """
+            SELECT data_type, character_maximum_length
+            FROM information_schema.columns
+            WHERE table_name = 'alembic_version'
+              AND column_name = 'version_num'
+            """
+        )
+    ).first()
+
+    if (
+        column_info
+        and column_info.data_type == "character varying"
+        and column_info.character_maximum_length is not None
+        and column_info.character_maximum_length < 64
+    ):
+        connection.execute(
+            text(
+                """
+                ALTER TABLE alembic_version
+                ALTER COLUMN version_num TYPE VARCHAR(255)
+                """
+            )
+        )
+        logger.info("alembic_version.version_num widened to varchar(255)")
+    else:
+        logger.info("alembic_version.version_num ok")
 
 
 def run_migrations_offline() -> None:
@@ -39,6 +72,7 @@ def run_migrations_online() -> None:
         context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
+            _ensure_alembic_version_column_length(connection)
             context.run_migrations()
 
 

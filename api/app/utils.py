@@ -72,6 +72,7 @@ async def get_availability_slots(
     target_date: date,
     now: datetime,
     master_id: int | None = None,
+    exclude_booking_id: int | None = None,
 ) -> list[tuple[datetime, datetime]]:
     service = await _service_exists(db, service_id)
     if not service:
@@ -125,6 +126,8 @@ async def get_availability_slots(
         Booking.starts_at < to_dt,
         Booking.ends_at > from_dt,
     ]
+    if exclude_booking_id is not None:
+        base_booking_filter.append(Booking.id != exclude_booking_id)
 
     if master_id is not None:
         master_exists = await db.execute(

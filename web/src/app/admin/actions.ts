@@ -585,6 +585,15 @@ export async function updateBookingAdminFormAction(
   formData: FormData
 ): Promise<UpdateBookingActionState> {
   const status = String(formData.get("status") ?? "");
+  const originalStatus = String(formData.get("original_status") ?? "");
+  const isRead = formData.get("is_read") === "on";
+  const originalIsRead = String(formData.get("original_is_read") ?? "") === "true";
+  const masterId = formData.get("master_id") ? Number(formData.get("master_id")) : null;
+  const originalMasterId = formData.get("original_master_id") ? Number(formData.get("original_master_id")) : null;
+  const startsAt = (formData.get("starts_at") as string | null)?.trim() ?? "";
+  const originalStartsAt = (formData.get("original_starts_at") as string | null)?.trim() ?? "";
+  const adminComment = ((formData.get("admin_comment") as string | null) || "").trim() || null;
+  const originalAdminComment = ((formData.get("original_admin_comment") as string | null) || "").trim() || null;
   const finalPriceRub = (formData.get("final_price_rub") as string | null)?.trim() ?? "";
 
   if (status === "DONE") {
@@ -594,29 +603,43 @@ export async function updateBookingAdminFormAction(
     }
   }
 
-  const payload: UpdateBookingPayload = {
-    id: Number(formData.get("id")),
-    status,
-    is_read: formData.get("is_read") === "on",
-    master_id: formData.get("master_id") ? Number(formData.get("master_id")) : null,
-    admin_comment: ((formData.get("admin_comment") as string | null) || "").trim() || null
-  };
-
-  const startsAt = (formData.get("starts_at") as string | null)?.trim();
-  if (startsAt) {
-    payload.starts_at = startsAt;
-  }
-
+  let finalPriceCents: number | null;
   if (status === "DONE") {
-    payload.final_price_cents = Math.round(Number(finalPriceRub) * 100);
+    finalPriceCents = Math.round(Number(finalPriceRub) * 100);
   } else if (finalPriceRub === "") {
-    payload.final_price_cents = null;
+    finalPriceCents = null;
   } else {
     const parsedPrice = Number(finalPriceRub);
     if (Number.isNaN(parsedPrice)) {
       return { ok: false, error: "Укажите корректную финальную цену" };
     }
-    payload.final_price_cents = Math.round(parsedPrice * 100);
+    finalPriceCents = Math.round(parsedPrice * 100);
+  }
+
+  const originalFinalPriceRaw = (formData.get("original_final_price_cents") as string | null)?.trim() ?? "";
+  const originalFinalPriceCents = originalFinalPriceRaw === "" ? null : Number(originalFinalPriceRaw);
+
+  const payload: UpdateBookingPayload = {
+    id: Number(formData.get("id"))
+  };
+
+  if (status !== originalStatus) {
+    payload.status = status;
+  }
+  if (isRead !== originalIsRead) {
+    payload.is_read = isRead;
+  }
+  if (masterId !== originalMasterId) {
+    payload.master_id = masterId;
+  }
+  if (startsAt && startsAt !== originalStartsAt) {
+    payload.starts_at = startsAt;
+  }
+  if (adminComment !== originalAdminComment) {
+    payload.admin_comment = adminComment;
+  }
+  if (finalPriceCents !== originalFinalPriceCents) {
+    payload.final_price_cents = finalPriceCents;
   }
 
   try {

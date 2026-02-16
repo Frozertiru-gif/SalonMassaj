@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_admin, require_sys_admin
 from app.core.config import settings
 from app.db import get_db
-from app.models import Admin, AuditActorType, AuditLog, Booking, BookingStatus, Master, Notification, Review, Service, ServiceCategory, Setting, WeeklyRitual
-from app.services.bookings import resolve_available_slot
+from app.models import Admin, AuditActorType, AuditLog, Booking, BookingStatus, Master, Notification, Review, Service, ServiceCategory, Setting, WeeklyRitual, master_services
+from app.services.bookings import normalize_booking_start, resolve_available_slot
 from app.services.audit import log_event
 from app.services.telegram import (
     delete_webhook,
@@ -25,13 +25,18 @@ from app.services.telegram import (
     send_message,
     set_webhook,
 )
-from app.utils import get_availability_slots, parse_date_param
+from app.utils import DEFAULT_SLOT_STEP_MIN, get_availability_slots, get_setting, parse_date_param
 from app.schemas import (
     AuditLogOut,
     BookingAdminCreate,
     BookingOut,
+    BookingMovePayload,
     BookingSlotOut,
     BookingUpdate,
+    AdminAvailabilityOut,
+    AdminAvailabilityServiceOut,
+    AdminScheduleBookingOut,
+    AdminScheduleOut,
     MasterCreate,
     MasterOut,
     MasterUpdate,
@@ -54,10 +59,24 @@ from app.schemas import (
     WeeklyRitualCreate,
     WeeklyRitualOut,
     WeeklyRitualUpdate,
+    ScheduleMasterOut,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 logger = logging.getLogger(__name__)
+
+
+def _source_label(value: str | None) -> str:
+    if not value:
+        return "public"
+    return "admin" if value.upper() == "ADMIN" else "public"
+
+
+async def _slot_step_min(db: AsyncSession) -> int:
+    slot_step_min_setting = await get_setting(db, "slot_step_min")
+    if isinstance(slot_step_min_setting, dict):
+        return int(slot_step_min_setting.get("value", DEFAULT_SLOT_STEP_MIN))
+    return int(slot_step_min_setting or DEFAULT_SLOT_STEP_MIN)
 
 
 CYRILLIC_TRANSLIT = {
@@ -592,6 +611,101 @@ async def telegram_delete_webhook(drop_pending_updates: bool = Query(default=Fal
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="TELEGRAM_BOT_TOKEN is not configured")
     return await delete_webhook(drop_pending_updates=drop_pending_updates)
 
+@router.get("/schedule", response_model=AdminScheduleOut)
+async def get_schedule(date: str, mode: str = "day", db: AsyncSession = Depends(get_db)):
+    try:
+        selected_date = parse_date_param(date)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    normalized_mode = mode.lower()
+    if normalized_mode not in {"day", "week"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode must be day or week")
+
+    if normalized_mode == "week":
+        date_from = selected_date - timedelta(days=selected_date.weekday())
+        date_to = date_from + timedelta(days=6)
+    else:
+        date_from = selected_date
+        date_to = selected_date
+
+    masters_result = await db.execute(select(Master).where(Master.is_active.is_(True)).order_by(Master.sort_order, Master.name))
+    masters = masters_result.scalars().all()
+
+    bookings_result = await db.execute(
+        select(Booking)
+        .where(Booking.starts_at >= datetime.combine(date_from, datetime.min.time()), Booking.starts_at <= datetime.combine(date_to, datetime.max.time()))
+        .options(selectinload(Booking.service))
+        .order_by(Booking.starts_at.asc(), Booking.id.asc())
+    )
+    bookings = bookings_result.scalars().all()
+
+    return AdminScheduleOut(
+        mode=normalized_mode,
+        date_from=date_from,
+        date_to=date_to,
+        slot_step_min=await _slot_step_min(db),
+        masters=[ScheduleMasterOut(id=master.id, name=master.name) for master in masters],
+        bookings=[
+            AdminScheduleBookingOut(
+                id=booking.id,
+                master_id=booking.master_id,
+                service_id=booking.service_id,
+                service_title=booking.service.title if booking.service else None,
+                starts_at=booking.starts_at,
+                ends_at=booking.ends_at,
+                status=booking.status.value,
+                client_name=booking.client_name,
+                client_phone=booking.client_phone,
+                source=_source_label(booking.source),
+            )
+            for booking in bookings
+        ],
+    )
+
+
+@router.get("/availability", response_model=AdminAvailabilityOut)
+async def get_admin_availability(
+    date: str,
+    service_id: int = 1,
+    master_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        target_date = parse_date_param(date)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    service = (await db.execute(select(Service).where(Service.id == service_id, Service.is_active.is_(True)))).scalar_one_or_none()
+    if not service:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+
+    masters_query = (
+        select(Master)
+        .join(master_services, and_(master_services.c.master_id == Master.id, master_services.c.service_id == service_id))
+        .where(Master.is_active.is_(True))
+        .order_by(Master.sort_order, Master.name)
+    )
+    if master_id is not None:
+        masters_query = masters_query.where(Master.id == master_id)
+
+    masters = (await db.execute(masters_query)).scalars().all()
+
+    now = datetime.now()
+    slots_by_master: dict[str, list[str]] = {}
+    for master in masters:
+        slots = await get_availability_slots(db, service_id, target_date, now, master_id=master.id)
+        slots_by_master[str(master.id)] = [slot_start.strftime("%H:%M") for slot_start, _ in slots]
+
+    return AdminAvailabilityOut(
+        date=target_date,
+        slot_step_min=await _slot_step_min(db),
+        service=AdminAvailabilityServiceOut(id=service.id, duration_min=service.duration_min, title=service.title),
+        masters=[ScheduleMasterOut(id=master.id, name=master.name) for master in masters],
+        slots_by_master=slots_by_master,
+    )
+
+
 @router.get("/bookings", response_model=list[BookingOut])
 async def list_bookings(
     booking_status: str | None = Query(default=None, alias="status"),
@@ -649,7 +763,7 @@ async def list_booking_slots(service_id: int, date: str, master_id: int | None =
 
 @router.post("/bookings", response_model=BookingOut)
 async def create_booking(payload: BookingAdminCreate, request: Request, db: AsyncSession = Depends(get_db), admin: Admin = Depends(require_admin)):
-    requested_start = datetime.combine(payload.date, payload.time)
+    requested_start = normalize_booking_start(booking_date=payload.date, booking_time=payload.time)
     chosen = await resolve_available_slot(db, payload.service_id, requested_start, datetime.now(), master_id=payload.master_id)
 
     try:
@@ -686,6 +800,54 @@ async def create_booking(payload: BookingAdminCreate, request: Request, db: Asyn
     booking_out = result.scalar_one()
     ip, user_agent = _request_context(request)
     await log_event(db, actor_type=AuditActorType.web, actor_admin=admin, action="booking.create", entity_type="booking", entity_id=booking_out.id, meta={"status": booking_out.status.value}, ip=ip, user_agent=user_agent)
+    return booking_out
+
+
+@router.patch("/bookings/{booking_id}/move", response_model=BookingOut)
+async def move_booking(
+    booking_id: int,
+    payload: BookingMovePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: Admin = Depends(require_admin),
+):
+    result = await db.execute(
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category), selectinload(Booking.master).selectinload(Master.services))
+    )
+    booking = result.scalar_one_or_none()
+    if not booking:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+
+    if payload.master_id is not None:
+        master = (await db.execute(select(Master).where(Master.id == payload.master_id, Master.is_active.is_(True)))).scalar_one_or_none()
+        if not master:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid master")
+
+    requested_start = normalize_booking_start(booking_date=payload.date, booking_time=payload.time)
+    chosen_start, chosen_end = await resolve_available_slot(
+        db,
+        booking.service_id,
+        requested_start,
+        datetime.now(),
+        master_id=payload.master_id,
+    )
+
+    booking.master_id = payload.master_id
+    booking.starts_at = chosen_start
+    booking.ends_at = chosen_end
+    await db.flush()
+
+    refreshed = await db.execute(
+        select(Booking)
+        .where(Booking.id == booking_id)
+        .options(selectinload(Booking.service), selectinload(Booking.service).selectinload(Service.category), selectinload(Booking.master).selectinload(Master.services))
+    )
+    booking_out = refreshed.scalar_one()
+
+    ip, user_agent = _request_context(request)
+    await log_event(db, actor_type=AuditActorType.web, actor_admin=admin, action="booking.move", entity_type="booking", entity_id=booking_out.id, meta={"master_id": payload.master_id, "starts_at": booking_out.starts_at.isoformat()}, ip=ip, user_agent=user_agent)
     return booking_out
 
 

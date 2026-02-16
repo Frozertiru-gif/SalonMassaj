@@ -383,3 +383,50 @@ class BookingSlotOut(BaseModel):
     time: str
     starts_at: datetime
     ends_at: datetime
+
+
+class ScheduleMasterOut(BaseModel):
+    id: int
+    name: str
+
+
+class AdminScheduleBookingOut(BaseModel):
+    id: int
+    master_id: int | None = None
+    service_id: int
+    service_title: str | None = None
+    starts_at: datetime
+    ends_at: datetime
+    status: str
+    client_name: str
+    client_phone: str
+    source: str
+
+
+class AdminScheduleOut(BaseModel):
+    mode: str
+    date_from: date
+    date_to: date
+    slot_step_min: int
+    masters: list[ScheduleMasterOut]
+    bookings: list[AdminScheduleBookingOut]
+
+
+class AdminAvailabilityServiceOut(BaseModel):
+    id: int
+    duration_min: int
+    title: str
+
+
+class AdminAvailabilityOut(BaseModel):
+    date: date
+    slot_step_min: int
+    service: AdminAvailabilityServiceOut
+    masters: list[ScheduleMasterOut]
+    slots_by_master: dict[str, list[str]]
+
+
+class BookingMovePayload(BaseModel):
+    master_id: int | None = None
+    date: date
+    time: time

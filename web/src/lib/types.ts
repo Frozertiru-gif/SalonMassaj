@@ -124,3 +124,43 @@ export type BookingSlot = {
   starts_at: string;
   ends_at: string;
 };
+
+
+export type ScheduleMaster = {
+  id: number;
+  name: string;
+};
+
+export type ScheduleBooking = {
+  id: number;
+  master_id?: number | null;
+  service_id: number;
+  service_title?: string | null;
+  starts_at: string;
+  ends_at: string;
+  status: string;
+  client_name: string;
+  client_phone: string;
+  source: "public" | "admin" | string;
+};
+
+export type AdminScheduleResponse = {
+  mode: "day" | "week";
+  date_from: string;
+  date_to: string;
+  slot_step_min: number;
+  masters: ScheduleMaster[];
+  bookings: ScheduleBooking[];
+};
+
+export type AdminAvailabilityResponse = {
+  date: string;
+  slot_step_min: number;
+  service: {
+    id: number;
+    duration_min: number;
+    title: string;
+  };
+  masters: ScheduleMaster[];
+  slots_by_master: Record<string, string[]>;
+};

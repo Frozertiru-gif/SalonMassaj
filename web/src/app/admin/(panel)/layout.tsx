@@ -1,20 +1,15 @@
 import { ReactNode } from "react";
 import { Button } from "@/components/Button";
-import { adminFetchResponse, ServiceUnavailableError } from "@/lib/api";
-import type { AdminProfile } from "@/lib/types";
+import { ServiceUnavailableError } from "@/lib/api";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { logoutAdmin } from "../actions";
+import { getCurrentAdmin } from "../adminApi";
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   let authWarning: string | null = null;
-  let adminProfile: AdminProfile | null = null;
+  let adminProfile: Awaited<ReturnType<typeof getCurrentAdmin>> | null = null;
   try {
-    const response = await adminFetchResponse("/admin/auth/me", { currentPath: "/admin" });
-    if (!response.ok) {
-      authWarning = "Не удалось проверить сессию. Данные могут быть устаревшими.";
-    } else {
-      adminProfile = (await response.json()) as AdminProfile;
-    }
+    adminProfile = await getCurrentAdmin();
   } catch (error) {
     if (error instanceof ServiceUnavailableError) {
       authWarning = "Не удалось проверить сессию. Данные могут быть устаревшими.";

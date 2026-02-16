@@ -7,11 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_admin
+from app.api.deps import CurrentAdmin, get_current_admin
 from app.core.security import create_access_token, verify_password
 from app.db import get_db
 from app.models import Admin, AuditActorType
-from app.schemas import AdminLogin, AdminOut, Token
+from app.schemas import AdminLogin, CurrentAdminOut, Token
 from app.services.audit import log_event
 
 router = APIRouter(prefix="/admin/auth", tags=["auth"])
@@ -36,6 +36,6 @@ async def login(payload: AdminLogin, db: AsyncSession = Depends(get_db)):
     return {"access_token": token}
 
 
-@router.get("/me", response_model=AdminOut)
-async def me(admin: Admin = Depends(get_current_admin)):
+@router.get("/me", response_model=CurrentAdminOut)
+async def me(admin: CurrentAdmin = Depends(get_current_admin)):
     return admin

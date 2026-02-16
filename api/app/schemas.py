@@ -1,5 +1,5 @@
 from datetime import date, datetime, time
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -22,6 +22,11 @@ class AdminOut(BaseModel):
     role: str
     is_active: bool
 
+
+
+
+class CurrentAdminOut(BaseModel):
+    role: Literal["SYS_ADMIN", "ADMIN"]
 
 
 

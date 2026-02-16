@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { AdminAvailabilityResponse, AdminScheduleResponse, ScheduleBooking } from "@/lib/types";
 import { Card } from "@/components/Card";
 import { clientAdminFetch } from "@/lib/clientApi";
@@ -26,6 +26,41 @@ function displayDate(value: string): string {
   return new Date(`${value}T00:00:00`).toLocaleDateString("ru-RU");
 }
 
+function getWeekDays(anchorDate: string): string[] {
+  const date = new Date(`${anchorDate}T00:00:00`);
+  const day = date.getDay();
+  const shift = day === 0 ? -6 : 1 - day;
+  const monday = new Date(date);
+  monday.setDate(date.getDate() + shift);
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const current = new Date(monday);
+    current.setDate(monday.getDate() + index);
+    return toIsoDate(current);
+  });
+}
+
+function bookingDateTimeParts(startsAt: string): { date: string; time: string } {
+  const [datePart, timePart] = startsAt.split("T");
+  if (datePart && timePart) {
+    return { date: datePart, time: timePart.slice(0, 5) };
+  }
+
+  const parsed = new Date(startsAt);
+  return {
+    date: toIsoDate(parsed),
+    time: parsed.toTimeString().slice(0, 5)
+  };
+}
+
+function weekDayHeader(date: string): string {
+  return new Date(`${date}T00:00:00`).toLocaleDateString("ru-RU", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit"
+  });
+}
+
 type QuickState = {
   date: string;
   time: string;
@@ -47,11 +82,26 @@ export function ScheduleClient({
   const [availability, setAvailability] = useState(initialAvailability);
   const [error, setError] = useState<string | null>(null);
   const [quickState, setQuickState] = useState<QuickState>(null);
+  const [weekMasterId, setWeekMasterId] = useState<string>(String(initialAvailability.masters[0]?.id ?? ""));
   const [searchMasterId, setSearchMasterId] = useState<string>("any");
   const [searchResults, setSearchResults] = useState<Array<{ date: string; time: string; master_id: number; master_name: string }>>([]);
   const [searchLoading, setSearchLoading] = useState(false);
 
   const masters = availability.masters;
+
+  useEffect(() => {
+    if (masters.length === 0) {
+      setWeekMasterId("");
+      return;
+    }
+    const hasSelected = masters.some((master) => String(master.id) === weekMasterId);
+    if (!hasSelected) {
+      setWeekMasterId(String(masters[0].id));
+    }
+  }, [masters, weekMasterId]);
+
+  const selectedWeekMaster = masters.find((master) => String(master.id) === weekMasterId) ?? null;
+  const weekDays = useMemo(() => getWeekDays(date), [date]);
 
   const timeAxis = useMemo(() => {
     const all = Object.values(availability.slots_by_master).flat();
@@ -64,12 +114,12 @@ export function ScheduleClient({
     return list;
   }, [availability]);
 
-  const bookingsByMasterAndTime = useMemo(() => {
+  const bookingsBySlot = useMemo(() => {
     const map = new Map<string, ScheduleBooking>();
     for (const booking of schedule.bookings) {
       if (booking.master_id == null) continue;
-      const time = new Date(booking.starts_at).toTimeString().slice(0, 5);
-      map.set(`${booking.master_id}-${time}`, booking);
+      const { date: bookingDate, time } = bookingDateTimeParts(booking.starts_at);
+      map.set(`${bookingDate}|${time}|${booking.master_id}`, booking);
     }
     return map;
   }, [schedule.bookings]);
@@ -198,50 +248,108 @@ export function ScheduleClient({
             Неделя
           </button>
         </div>
+        {mode === "week" ? (
+          <div>
+            <label className="text-xs text-ink-500">Мастер</label>
+            <select
+              className="mt-1 rounded-xl border border-blush-100 px-3 py-2 text-sm"
+              value={weekMasterId}
+              onChange={(event) => setWeekMasterId(event.target.value)}
+            >
+              {masters.map((master) => (
+                <option key={master.id} value={master.id}>{master.name}</option>
+              ))}
+            </select>
+          </div>
+        ) : null}
       </div>
 
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
-      <Card className="overflow-auto">
-        <div className="min-w-[800px]">
-          <div className="grid" style={{ gridTemplateColumns: `120px repeat(${masters.length}, minmax(160px, 1fr))` }}>
-            <div className="border-b border-blush-100 p-2 text-xs uppercase text-ink-500">Время</div>
-            {masters.map((master) => (
-              <div key={master.id} className="border-b border-blush-100 p-2 text-sm font-medium text-ink-900">{master.name}</div>
-            ))}
-            {timeAxis.map((time) => (
-              <Fragment key={time}>
-                <div key={`t-${time}`} className="border-b border-blush-50 p-2 text-xs text-ink-500">{time}</div>
-                {masters.map((master) => {
-                  const booking = bookingsByMasterAndTime.get(`${master.id}-${time}`);
-                  const free = (availability.slots_by_master[String(master.id)] ?? []).includes(time);
-                  return (
-                    <div key={`${master.id}-${time}`} className="border-b border-l border-blush-50 p-1">
-                      {booking ? (
-                        <div className="rounded-lg bg-blush-100 p-2 text-xs">
-                          <p className="font-semibold">{booking.client_name}</p>
-                          <p>{booking.client_phone}</p>
-                          <p className="uppercase text-[10px]">{booking.status} • {booking.source === "admin" ? "админ" : "публично"}</p>
-                        </div>
-                      ) : free ? (
-                        <button
-                          type="button"
-                          className="w-full rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800"
-                          onClick={() => setQuickState({ date, time, master_id: master.id })}
-                        >
-                          + Записать
-                        </button>
-                      ) : (
-                        <div className="h-8 rounded-lg bg-slate-50" />
-                      )}
-                    </div>
-                  );
-                })}
-              </Fragment>
-            ))}
+      {mode === "day" ? (
+        <Card className="overflow-auto">
+          <div className="min-w-[800px]">
+            <div className="grid" style={{ gridTemplateColumns: `120px repeat(${masters.length}, minmax(160px, 1fr))` }}>
+              <div className="border-b border-blush-100 p-2 text-xs uppercase text-ink-500">Время</div>
+              {masters.map((master) => (
+                <div key={master.id} className="border-b border-blush-100 p-2 text-sm font-medium text-ink-900">{master.name}</div>
+              ))}
+              {timeAxis.map((time) => (
+                <Fragment key={time}>
+                  <div key={`t-${time}`} className="border-b border-blush-50 p-2 text-xs text-ink-500">{time}</div>
+                  {masters.map((master) => {
+                    const booking = bookingsBySlot.get(`${date}|${time}|${master.id}`);
+                    const free = (availability.slots_by_master[String(master.id)] ?? []).includes(time);
+                    return (
+                      <div key={`${master.id}-${time}`} className="border-b border-l border-blush-50 p-1">
+                        {booking ? (
+                          <div className="rounded-lg bg-blush-100 p-2 text-xs">
+                            <p className="font-semibold">{booking.client_name}</p>
+                            <p>{booking.client_phone}</p>
+                            <p className="uppercase text-[10px]">{booking.status} • {booking.source === "admin" ? "админ" : "публично"}</p>
+                          </div>
+                        ) : free ? (
+                          <button
+                            type="button"
+                            className="w-full rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800"
+                            onClick={() => setQuickState({ date, time, master_id: master.id })}
+                          >
+                            + Записать
+                          </button>
+                        ) : (
+                          <div className="h-8 rounded-lg bg-slate-50" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </Fragment>
+              ))}
+            </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      ) : (
+        <Card className="overflow-auto">
+          <div className="min-w-[980px]">
+            <div className="grid" style={{ gridTemplateColumns: "120px repeat(7, minmax(130px, 1fr))" }}>
+              <div className="sticky left-0 top-0 z-30 border-b border-blush-100 bg-white p-2 text-xs uppercase text-ink-500">Время</div>
+              {weekDays.map((day) => (
+                <div key={day} className="sticky top-0 z-20 border-b border-l border-blush-100 bg-white p-2 text-xs font-semibold uppercase text-ink-900">
+                  {weekDayHeader(day)}
+                </div>
+              ))}
+              {timeAxis.map((time) => (
+                <Fragment key={time}>
+                  <div className="sticky left-0 z-10 border-b border-blush-50 bg-white p-2 text-xs text-ink-500">{time}</div>
+                  {weekDays.map((day) => {
+                    const booking = selectedWeekMaster ? bookingsBySlot.get(`${day}|${time}|${selectedWeekMaster.id}`) : undefined;
+                    return (
+                      <div key={`${day}-${time}`} className="border-b border-l border-blush-50 p-1">
+                        {booking ? (
+                          <div className="rounded-lg bg-blush-100 p-2 text-xs">
+                            <p className="font-semibold">{booking.client_name}</p>
+                            <p>{booking.client_phone}</p>
+                            <p className="uppercase text-[10px]">{booking.status} • {booking.source === "admin" ? "админ" : "публично"}</p>
+                          </div>
+                        ) : selectedWeekMaster ? (
+                          <button
+                            type="button"
+                            className="w-full rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800"
+                            onClick={() => setQuickState({ date: day, time, master_id: selectedWeekMaster.id })}
+                          >
+                            + Записать
+                          </button>
+                        ) : (
+                          <div className="h-8 rounded-lg bg-slate-50" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </Fragment>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
 
       <Card className="space-y-3">
         <p className="text-sm font-semibold">Поиск ближайшего окна</p>

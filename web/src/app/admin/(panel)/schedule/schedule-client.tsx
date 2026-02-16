@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import type { AdminAvailabilityResponse, AdminScheduleResponse, ScheduleBooking } from "@/lib/types";
 import { Card } from "@/components/Card";
 import { clientAdminFetch } from "@/lib/clientApi";
@@ -67,8 +67,16 @@ export function ScheduleClient({
 
   const masters = availability.masters;
 
-  const timeAxis = useMemo(() => {
-    const all = Object.values(availability.slots_by_master).flat();
+
+      // Compatibility key for date-aware views (day/week mobile).
+      // Backward-compatible key used by older schedule rendering flows.
+      map.set(`${booking.master_id}-${time}`, booking);
+  const getBookingBySlot = useCallback((slotDate: string, masterId: number, time: string): ScheduleBooking | undefined => {
+    return bookingsByMasterAndTime.get(`${slotDate}-${masterId}-${time}`) ?? bookingsByMasterAndTime.get(`${masterId}-${time}`);
+  }, [bookingsByMasterAndTime]);
+
+      const booking = getBookingBySlot(date, selectedMaster.id, time);
+  }, [availability.slots_by_master, date, getBookingBySlot, selectedMaster, timeAxis]);
     const min = all.length > 0 ? Math.min(...all.map(timeToMinutes)) : 10 * 60;
     const max = all.length > 0 ? Math.max(...all.map(timeToMinutes)) + availability.service.duration_min : 21 * 60;
     const list: string[] = [];
@@ -286,7 +294,7 @@ export function ScheduleClient({
               <Fragment key={time}>
                 <div className="border-b border-blush-50 p-2 text-xs text-ink-500">{time}</div>
                 {masters.map((master) => {
-                  const booking = bookingsByMasterAndTime.get(`${date}-${master.id}-${time}`);
+                  const booking = getBookingBySlot(date, master.id, time);
                   const free = (availability.slots_by_master[String(master.id)] ?? []).includes(time);
                   return (
                     <div key={`${master.id}-${time}`} className="border-b border-l border-blush-50 p-1">
@@ -351,7 +359,7 @@ export function ScheduleClient({
           weekDays.map((day) => {
             const dayAvailability = availabilityByDate[day] ?? availability;
             const dayMaster = dayAvailability.masters.find((master) => String(master.id) === selectedMasterId) ?? dayAvailability.masters[0];
-            const daySlotsList = timeAxis.map((time) => {
+              const booking = dayMaster ? getBookingBySlot(day, dayMaster.id, time) : undefined;
               const booking = dayMaster ? bookingsByMasterAndTime.get(`${day}-${dayMaster.id}-${time}`) : undefined;
               const free = dayMaster ? (dayAvailability.slots_by_master[String(dayMaster.id)] ?? []).includes(time) : false;
               return { time, booking, free };

@@ -127,7 +127,7 @@ async def get_booking_slots(service_id: int, date: str, master_id: int | None = 
 
 @router.get("/settings/{key}")
 async def get_public_setting(key: str, db: AsyncSession = Depends(get_db)):
-    if key not in {"contacts"}:
+    if key not in {"contacts", "booking_rules", "slot_step_min"}:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Setting not found")
     value = await get_setting(db, key)
     return {"key": key, "value_jsonb": value}

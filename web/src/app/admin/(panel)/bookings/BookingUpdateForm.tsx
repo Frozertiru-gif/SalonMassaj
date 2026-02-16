@@ -34,6 +34,12 @@ export function BookingUpdateForm({ booking, masters }: BookingUpdateFormProps) 
   return (
     <form action={action} className="grid gap-2 md:grid-cols-4">
       <input type="hidden" name="id" value={booking.id} />
+      <input type="hidden" name="original_status" value={booking.status} />
+      <input type="hidden" name="original_is_read" value={String(booking.is_read)} />
+      <input type="hidden" name="original_master_id" value={booking.master?.id ?? ""} />
+      <input type="hidden" name="original_starts_at" value={formatDateTimeLocal(booking.starts_at)} />
+      <input type="hidden" name="original_admin_comment" value={booking.admin_comment ?? ""} />
+      <input type="hidden" name="original_final_price_cents" value={booking.final_price_cents ?? ""} />
       <select name="status" defaultValue={booking.status} className="rounded-full border border-blush-100 px-3 py-2 text-sm">
         <option value="NEW">Новая</option>
         <option value="CONFIRMED">Подтверждено</option>

@@ -53,8 +53,16 @@ async def resolve_available_slot(
     requested_start: datetime,
     now: datetime,
     master_id: int | None = None,
+    exclude_booking_id: int | None = None,
 ) -> tuple[datetime, datetime]:
-    slots = await get_availability_slots(db, service_id, requested_start.date(), now, master_id=master_id)
+    slots = await get_availability_slots(
+        db,
+        service_id,
+        requested_start.date(),
+        now,
+        master_id=master_id,
+        exclude_booking_id=exclude_booking_id,
+    )
     for slot_start, slot_end in slots:
         if slot_start == requested_start:
             return slot_start, slot_end

@@ -890,7 +890,6 @@ async def update_booking(booking_id: int, payload: BookingUpdate, request: Reque
                 message="status must be one of: NEW, CONFIRMED, CANCELLED, DONE",
             )
 
-    target_master_id = updates.get("master_id", booking.master_id)
     if "master_id" in updates and updates["master_id"] is not None:
         master = (await db.execute(select(Master).where(Master.id == updates["master_id"]))).scalar_one_or_none()
         if not master or not master.is_active:
@@ -900,19 +899,31 @@ async def update_booking(booking_id: int, payload: BookingUpdate, request: Reque
     provided_ends_at = updates.get("ends_at")
     provided_duration_min = updates.pop("duration_min", None)
 
+    normalized_proposed_starts_at = booking.starts_at
     if provided_starts_at is not None:
-        requested_start = provided_starts_at.replace(tzinfo=None, second=0, microsecond=0)
+        normalized_proposed_starts_at = provided_starts_at.replace(tzinfo=None, second=0, microsecond=0)
+
+    proposed_master_id = updates.get("master_id", booking.master_id)
+    schedule_changed = proposed_master_id != booking.master_id or normalized_proposed_starts_at != booking.starts_at
+
+    if provided_starts_at is not None:
         if provided_duration_min is not None and provided_duration_min <= 0:
             _booking_bad_request(booking_id, reason="invalid_duration", message="duration_min must be greater than zero")
 
-        slot_start, slot_end = await resolve_available_slot(
-            db,
-            booking.service_id,
-            requested_start,
-            datetime.now(),
-            master_id=target_master_id,
-        )
-        updates["starts_at"] = slot_start
+        if schedule_changed:
+            slot_start, slot_end = await resolve_available_slot(
+                db,
+                booking.service_id,
+                normalized_proposed_starts_at,
+                datetime.now(),
+                master_id=proposed_master_id,
+                exclude_booking_id=booking.id,
+            )
+            updates["starts_at"] = slot_start
+        else:
+            slot_start = normalized_proposed_starts_at
+            slot_end = booking.ends_at
+            updates["starts_at"] = slot_start
 
         if provided_ends_at is not None:
             normalized_end = provided_ends_at.replace(tzinfo=None, second=0, microsecond=0)
@@ -921,10 +932,19 @@ async def update_booking(booking_id: int, payload: BookingUpdate, request: Reque
             updates["ends_at"] = normalized_end
         elif provided_duration_min is not None:
             updates["ends_at"] = slot_start + timedelta(minutes=provided_duration_min)
-        else:
+        elif schedule_changed:
             updates["ends_at"] = slot_end
     elif provided_ends_at is not None:
         _booking_bad_request(booking_id, reason="starts_at_required", message="starts_at is required when ends_at is provided")
+    elif schedule_changed:
+        await resolve_available_slot(
+            db,
+            booking.service_id,
+            booking.starts_at,
+            datetime.now(),
+            master_id=proposed_master_id,
+            exclude_booking_id=booking.id,
+        )
 
     target_status = updates.get("status", booking.status)
     if target_status == BookingStatus.done:

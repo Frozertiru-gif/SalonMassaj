@@ -3,6 +3,7 @@ import logging
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool, text
+from sqlalchemy.exc import ProgrammingError
 
 from app.core.config import settings
 from app.models import Base
@@ -18,12 +19,26 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_alembic_version_column_length(connection) -> None:
+    # Some local revision IDs are longer than 32 chars (for example merge revisions).
+    # If the project was bootstrapped with varchar(32), alembic crashes while inserting
+    # the revision into alembic_version. Widen the column before running migrations.
+    try:
+        table_exists = connection.execute(text("SELECT to_regclass('public.alembic_version') IS NOT NULL")).scalar_one()
+    except ProgrammingError:
+        logger.exception("Failed to check alembic_version existence")
+        raise
+
+    if not table_exists:
+        logger.info("alembic_version table not found, skip pre-migration fix")
+        return
+
     column_info = connection.execute(
         text(
             """
             SELECT data_type, character_maximum_length
             FROM information_schema.columns
-            WHERE table_name = 'alembic_version'
+            WHERE table_schema = 'public'
+              AND table_name = 'alembic_version'
               AND column_name = 'version_num'
             """
         )
@@ -33,17 +48,17 @@ def _ensure_alembic_version_column_length(connection) -> None:
         column_info
         and column_info.data_type == "character varying"
         and column_info.character_maximum_length is not None
-        and column_info.character_maximum_length < 64
+        and column_info.character_maximum_length == 32
     ):
         connection.execute(
             text(
                 """
                 ALTER TABLE alembic_version
-                ALTER COLUMN version_num TYPE VARCHAR(255)
+                ALTER COLUMN version_num TYPE VARCHAR(64)
                 """
             )
         )
-        logger.info("alembic_version.version_num widened to varchar(255)")
+        logger.info("alembic_version.version_num widened to varchar(64)")
     else:
         logger.info("alembic_version.version_num ok")
 

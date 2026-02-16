@@ -13,14 +13,22 @@ const SESSION_EXPIRED_MESSAGE = "Сессия истекла. Войдите с�
 async function adminActionFetch(path: string, init?: RequestInit) {
   return adminFetchResponse(path, { ...init, currentPath: "/admin" });
 }
-function mapAdminErrorDetail(detail?: string) {
+function mapAdminErrorDetail(detail?: unknown) {
   if (!detail) {
-    return detail;
+    return undefined;
   }
-  if (detail === "Invalid token" || detail === "Inactive admin") {
+  const message = typeof detail === "string"
+    ? detail
+    : typeof detail === "object" && detail !== null && "message" in detail
+      ? String((detail as { message?: unknown }).message ?? "")
+      : undefined;
+  if (!message) {
+    return undefined;
+  }
+  if (message === "Invalid token" || message === "Inactive admin") {
     return SESSION_EXPIRED_MESSAGE;
   }
-  return detail;
+  return message;
 }
 
 export async function loginAdmin(_: LoginAdminState, formData: FormData): Promise<LoginAdminState> {
@@ -500,7 +508,7 @@ export async function deleteReview(
 }
 
 
-export async function updateBookingAdmin(payload: { id: number; status?: string; is_read?: boolean; master_id?: number | null; starts_at?: string; admin_comment?: string | null; final_price_cents?: number | null }) {
+export async function updateBookingAdmin(payload: { id: number; status?: string; is_read?: boolean; master_id?: number | null; starts_at?: string; ends_at?: string; duration_min?: number; admin_comment?: string | null; final_price_cents?: number | null | string }) {
     const response = await adminActionFetch(`/admin/bookings/${payload.id}`, {
     method: "PATCH",
     headers: {

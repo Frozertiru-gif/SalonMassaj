@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Token(BaseModel):
@@ -328,8 +328,25 @@ class BookingUpdate(BaseModel):
     is_read: bool | None = None
     master_id: int | None = None
     starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    duration_min: int | None = Field(default=None, ge=1)
     admin_comment: str | None = None
-    final_price_cents: int | None = Field(default=None, ge=0)
+    final_price_cents: int | str | None = Field(default=None)
+
+    @field_validator("final_price_cents", mode="before")
+    @classmethod
+    def normalize_final_price_cents(cls, value: object) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                return None
+            value = normalized
+        parsed = int(value)
+        if parsed < 0:
+            raise ValueError("final_price_cents must be >= 0")
+        return parsed
 
 
 class BookingAdminCreate(BaseModel):

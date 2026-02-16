@@ -632,9 +632,12 @@ async def get_schedule(date: str, mode: str = "day", db: AsyncSession = Depends(
     masters_result = await db.execute(select(Master).where(Master.is_active.is_(True)).order_by(Master.sort_order, Master.name))
     masters = masters_result.scalars().all()
 
+    period_start = datetime.combine(date_from, datetime.min.time())
+    period_end = datetime.combine(date_to, datetime.max.time())
+
     bookings_result = await db.execute(
         select(Booking)
-        .where(Booking.starts_at >= datetime.combine(date_from, datetime.min.time()), Booking.starts_at <= datetime.combine(date_to, datetime.max.time()))
+        .where(Booking.starts_at <= period_end, Booking.ends_at >= period_start)
         .options(selectinload(Booking.service))
         .order_by(Booking.starts_at.asc(), Booking.id.asc())
     )
@@ -657,6 +660,7 @@ async def get_schedule(date: str, mode: str = "day", db: AsyncSession = Depends(
                 status=booking.status.value,
                 client_name=booking.client_name,
                 client_phone=booking.client_phone,
+                comment=booking.comment,
                 source=_source_label(booking.source),
             )
             for booking in bookings
@@ -680,12 +684,7 @@ async def get_admin_availability(
     if not service:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
 
-    masters_query = (
-        select(Master)
-        .join(master_services, and_(master_services.c.master_id == Master.id, master_services.c.service_id == service_id))
-        .where(Master.is_active.is_(True))
-        .order_by(Master.sort_order, Master.name)
-    )
+    masters_query = select(Master).where(Master.is_active.is_(True)).order_by(Master.sort_order, Master.name)
     if master_id is not None:
         masters_query = masters_query.where(Master.id == master_id)
 

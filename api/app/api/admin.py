@@ -75,8 +75,14 @@ def _source_label(value: str | None) -> str:
 async def _slot_step_min(db: AsyncSession) -> int:
     slot_step_min_setting = await get_setting(db, "slot_step_min")
     if isinstance(slot_step_min_setting, dict):
-        return int(slot_step_min_setting.get("value", DEFAULT_SLOT_STEP_MIN))
-    return int(slot_step_min_setting or DEFAULT_SLOT_STEP_MIN)
+        raw_value = slot_step_min_setting.get("value", DEFAULT_SLOT_STEP_MIN)
+    else:
+        raw_value = slot_step_min_setting or DEFAULT_SLOT_STEP_MIN
+
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return DEFAULT_SLOT_STEP_MIN
 
 
 CYRILLIC_TRANSLIT = {
@@ -680,7 +686,7 @@ async def get_admin_availability(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
-    service = (await db.execute(select(Service).where(Service.id == service_id, Service.is_active.is_(True)))).scalar_one_or_none()
+    service = (await db.execute(select(Service).where(Service.id == service_id))).scalar_one_or_none()
     if not service:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
 

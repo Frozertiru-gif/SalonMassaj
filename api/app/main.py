@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import FastAPI
@@ -8,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import admin, auth, public, telegram
 from app.core.config import settings
 from app.db import AsyncSessionLocal
+from app.services.backup_service import BackupBusyError, backup_service
 from app.services.telegram import TelegramError, get_me, get_updates
 
 
@@ -79,6 +81,34 @@ async def _telegram_polling_loop() -> None:
             continue
 
 
+async def _run_scheduled_backup() -> None:
+    try:
+        await backup_service.run_backup_script()
+        await backup_service.send_latest_to_backup_chat()
+    except BackupBusyError:
+        logger.info("backup.scheduler skipped: operation already in progress")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("backup.scheduler failed")
+        await backup_service.notify_sys_admins(f"⚠️ Автобэкап завершился ошибкой: {exc}")
+
+
+async def _backup_scheduler_loop() -> None:
+    logger.info("backup scheduler started")
+    if backup_service.is_catchup_required():
+        logger.info("backup scheduler catch-up triggered")
+        await _run_scheduled_backup()
+
+    while True:
+        now = datetime.now(timezone.utc)
+        run_at = now.replace(hour=settings.backup_cron_hour, minute=settings.backup_cron_minute, second=0, microsecond=0)
+        if run_at <= now:
+            run_at = run_at + timedelta(days=1)
+        delay_seconds = (run_at - now).total_seconds()
+        logger.info("backup scheduler sleeping for %.0f sec until %s", delay_seconds, run_at.isoformat())
+        await asyncio.sleep(delay_seconds)
+        await _run_scheduled_backup()
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
     mode = (settings.telegram_mode or "webhook").strip().lower()
@@ -101,6 +131,12 @@ async def startup_event() -> None:
         if not settings.telegram_webhook_secret:
             logger.error("TELEGRAM_WEBHOOK_SECRET is not configured; webhook requests will be rejected")
 
+    app.state.backup_scheduler_task = None
+    if settings.backup_enabled and settings.backup_chat_id:
+        app.state.backup_scheduler_task = asyncio.create_task(_backup_scheduler_loop())
+    else:
+        logger.info("backup scheduler disabled (BACKUP_ENABLED=%s BACKUP_CHAT_ID=%s)", settings.backup_enabled, settings.backup_chat_id)
+
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
@@ -109,6 +145,14 @@ async def shutdown_event() -> None:
         task.cancel()
         try:
             await task
+        except asyncio.CancelledError:
+            pass
+
+    backup_task = getattr(app.state, "backup_scheduler_task", None)
+    if backup_task:
+        backup_task.cancel()
+        try:
+            await backup_task
         except asyncio.CancelledError:
             pass
 

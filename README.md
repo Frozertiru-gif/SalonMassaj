@@ -183,3 +183,23 @@ curl -s http://localhost:8000/admin/telegram/webhook-info
 - `diagnostics.token_configured` — должен быть `true`
 - если выбран `webhook`, должен быть валидный `current_webhook_url`
 
+
+## Backups (PostgreSQL)
+
+В API добавлен автоматический encrypted backup:
+- ежедневный запуск в `03:15 UTC` (`BACKUP_CRON_HOUR` / `BACKUP_CRON_MINUTE`),
+- catch-up при старте, если последняя копия старше 24 часов,
+- файлы в `BACKUP_DIR` (`*.dump.gpg`) + `last_backup.json`,
+- retention через `RETENTION_KEEP`.
+
+Обязательные ENV:
+- `BACKUP_ENABLED=true`
+- `BACKUP_CHAT_ID=<telegram_chat_id>`
+- `BACKUP_PASSPHRASE=<пароль шифрования>`
+
+В Docker Compose уже подключены:
+- `./api/backups:/app/backups`
+- `./api/scripts:/app/scripts`
+
+Управление доступно в Telegram только для `SYS_ADMIN` в личном чате через кнопку **«🛡 Резервные копии»**.
+Восстановление требует явного подтверждения inline-кнопкой.

@@ -160,6 +160,37 @@ async def _telegram_api(method: str, payload: dict[str, Any], timeout_override: 
     raise TelegramError("Telegram API request exhausted retries")
 
 
+async def _telegram_api_multipart(
+    method: str,
+    data: dict[str, Any],
+    files: dict[str, tuple[str, bytes, str]],
+    timeout_seconds: float = 120.0,
+) -> dict[str, Any]:
+    token = settings.telegram_bot_token
+    if not token:
+        raise TelegramError("TELEGRAM_BOT_TOKEN is not set")
+
+    timeout = httpx.Timeout(connect=10.0, read=timeout_seconds, write=timeout_seconds, pool=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"https://api.telegram.org/bot{token}/{method}",
+            data=data,
+            files=files,
+        )
+
+    short_text = _short_response_text(response.text)
+    if response.status_code >= 400:
+        logger.warning("Telegram multipart API status=%s method=%s body=%s", response.status_code, method, short_text)
+        raise TelegramError(f"Telegram API HTTP {response.status_code}: {short_text}")
+
+    result = response.json()
+    if not result.get("ok"):
+        description = str(result.get("description") or "Telegram API returned ok=false")
+        logger.warning("Telegram multipart API rejected: method=%s description=%s", method, description)
+        raise TelegramError(description)
+    return result
+
+
 async def get_webhook_info() -> dict[str, Any]:
     return await _telegram_api("getWebhookInfo", {})
 
@@ -217,6 +248,20 @@ async def edit_message_text(
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
     return await _telegram_api("editMessageText", payload)
+
+
+async def send_document(chat_id: int | str, file_path: str, caption: str | None = None) -> dict[str, Any]:
+    with open(file_path, "rb") as file_handle:
+        document_bytes = file_handle.read()
+    data: dict[str, Any] = {"chat_id": str(chat_id)}
+    if caption:
+        data["caption"] = caption
+    files = {"document": (file_path.split("/")[-1], document_bytes, "application/octet-stream")}
+    return await _telegram_api_multipart("sendDocument", data=data, files=files, timeout_seconds=180.0)
+
+
+async def get_file(file_id: str) -> dict[str, Any]:
+    return await _telegram_api("getFile", {"file_id": file_id})
 
 
 async def get_tg_notifications_settings(db: AsyncSession) -> TgNotificationsSettings:

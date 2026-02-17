@@ -30,19 +30,18 @@ class BackupServiceRuntimeValidationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as context:
                 service._validate_backup_runtime()
 
-        self.assertIn("bash is not available in PATH", str(context.exception))
+        self.assertIn("bash is required to run backup script", str(context.exception))
 
-    def test_validate_backup_runtime_fails_when_script_not_executable(self):
+    def test_validate_backup_runtime_allows_non_executable_script_when_using_bash(self):
         script_path = Path(self._tmp.name) / "backup_db.sh"
         script_path.write_text("#!/usr/bin/env bash\nset -euo pipefail\n", encoding="utf-8")
         script_path.chmod(0o644)
 
         service = self._make_service()
         with patch.object(settings, "backup_script_path", str(script_path)), patch("app.services.backup_service.shutil.which", return_value="/usr/bin/bash"):
-            with self.assertRaises(RuntimeError) as context:
-                service._validate_backup_runtime()
+            validated = service._validate_backup_runtime()
 
-        self.assertIn("backup script is not executable", str(context.exception))
+        self.assertEqual(validated, script_path)
 
 
 if __name__ == "__main__":

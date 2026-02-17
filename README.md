@@ -212,6 +212,7 @@ curl -s http://localhost:8000/admin/telegram/webhook-info
 - catch-up при старте, если последняя копия старше 24 часов,
 - файлы в `BACKUP_DIR` (`*.dump.gpg`) + `last_backup.json`,
 - retention через `RETENTION_KEEP`.
+- backup-скрипт исполняется через `bash`, поэтому `bash` должен быть установлен внутри API-контейнера (в текущем `api/Dockerfile` уже установлен).
 
 Обязательные ENV:
 - `BACKUP_ENABLED=true`

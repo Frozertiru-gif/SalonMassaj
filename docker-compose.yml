@@ -21,7 +21,7 @@ services:
       context: ./api
     working_dir: /app
     env_file:
-      - ./.env.docker
+      - ./.env
     environment:
       BACKUP_DIR: /app/backups
       BACKUP_SCRIPT_PATH: /app/scripts/backup_db.sh
@@ -51,7 +51,7 @@ services:
       context: ./api
     working_dir: /app
     env_file:
-      - ./.env.docker
+      - ./.env
     environment:
       PYTHONPATH: /app
     depends_on:
@@ -68,7 +68,7 @@ services:
       context: ./api
     working_dir: /app
     env_file:
-      - ./.env.docker
+      - ./.env
     environment:
       PYTHONPATH: /app
     depends_on:

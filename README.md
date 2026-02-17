@@ -11,7 +11,7 @@
 ## Быстрый старт (Docker Compose)
 
 ```bash
-cp .env.example .env.docker
+cp .env.example .env
 docker compose up -d --build
 ```
 
@@ -51,7 +51,7 @@ cd api
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.local.example .env
+cp .env.example .env
 alembic upgrade head
 SEED_ADMIN=true ADMIN_EMAIL=owner@example.com ADMIN_PASSWORD=owner123 python -m app.scripts.seed_admin
 uvicorn app.main:app --reload
@@ -68,16 +68,16 @@ npm run dev
 
 ## Переменные окружения
 
-### Docker Compose (`/.env.docker`)
+### Docker Compose (`/.env`)
 
-- `api`, `migrate`, `seed` читают переменные из `/.env.docker`.
+- `api`, `migrate`, `seed` читают переменные из `/.env`.
 - Для Docker `DATABASE_URL` должен указывать на сервис Postgres `db`:
   - `postgresql+asyncpg://postgres:postgres@db:5432/salon`
-- Быстрый старт: `cp .env.example .env.docker`.
+- Быстрый старт: `cp .env.example .env`.
 
 ### Локальный запуск API вне Docker (`/api/.env`)
 
-- Шаблон: `/api/.env.local.example` (или `/api/.env.example`).
+- Шаблон: `/api/.env.example`.
 - Для локального запуска `DATABASE_URL` должен указывать на `localhost`:
   - `postgresql+asyncpg://postgres:postgres@localhost:5432/salon`
 

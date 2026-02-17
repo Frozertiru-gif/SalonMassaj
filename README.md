@@ -32,15 +32,20 @@ docker compose run --rm migrate
 
 Alembic использует синхронный драйвер (psycopg2), поэтому `psycopg2-binary` установлен в `api/requirements.txt`.
 
-### Seed администратора (dev)
+### Seed админ-аккаунтов (dev)
 
 ```bash
-SEED_ADMIN=true ADMIN_EMAIL=owner@example.com ADMIN_PASSWORD=owner123 \
+SEED_ADMIN=true \
+SYS_ADMIN_EMAIL=owner@example.com SYS_ADMIN_PASSWORD=owner123 \
+ADMIN_EMAIL=manager@example.com ADMIN_PASSWORD=manager123 \
   docker compose run --rm seed
 ```
 
-Seed не создаёт дубликаты: если админ с таким email уже есть, он не будет пересоздан.
-Создаваемый через seed пользователь получает роль `SYS_ADMIN`.
+Seed поддерживает два аккаунта:
+- `SYS_ADMIN_*` — системный администратор.
+- `ADMIN_*` — обычный администратор (опционально).
+
+Seed работает как upsert: если email уже существует, роль/пароль/active обновляются по ENV.
 
 ## Локальный запуск без Docker
 
@@ -53,7 +58,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 alembic upgrade head
-SEED_ADMIN=true ADMIN_EMAIL=owner@example.com ADMIN_PASSWORD=owner123 python -m app.scripts.seed_admin
+SEED_ADMIN=true SYS_ADMIN_EMAIL=owner@example.com SYS_ADMIN_PASSWORD=owner123 ADMIN_EMAIL=manager@example.com ADMIN_PASSWORD=manager123 python -m app.scripts.seed_admin
 uvicorn app.main:app --reload
 ```
 
@@ -81,7 +86,7 @@ npm run dev
 - Файл `api/.env.example` намеренно минимальный: в нём только значения,
   которые обычно отличаются от корневого `/.env`.
 - Остальные переменные можно копировать из `/.env.example` по мере необходимости.
-- `ADMIN_EMAIL`/`ADMIN_PASSWORD` не являются обязательной зависимостью `api/.env`: они нужны только для seed и обычно передаются инлайн в команде запуска.
+- `SYS_ADMIN_EMAIL`/`SYS_ADMIN_PASSWORD` (и опционально `ADMIN_EMAIL`/`ADMIN_PASSWORD`) обычно задаются инлайн только для seed-команды.
 - Для локального запуска `DATABASE_URL` должен указывать на `localhost`:
   - `postgresql+asyncpg://postgres:postgres@localhost:5432/salon`
 
@@ -99,12 +104,12 @@ npm run dev
 
 URL: http://localhost:3000/admin/login
 
-Dev-вход:
-- email: значение `ADMIN_EMAIL`
-- пароль: значение `ADMIN_PASSWORD`
+Dev-вход (если seed запущен с двумя аккаунтами):
+- `SYS_ADMIN`: `SYS_ADMIN_EMAIL` / `SYS_ADMIN_PASSWORD`
+- `ADMIN`: `ADMIN_EMAIL` / `ADMIN_PASSWORD`
 
-Чтобы сменить пароль, задайте новое значение `ADMIN_PASSWORD`, удалите запись администратора из таблицы `admins`
-или обновите её вручную, затем повторно запустите seed-скрипт.
+Если меняете пароль/роль — просто перезапустите seed с новыми ENV,
+скрипт обновит существующие записи в `admins`.
 
 Роли:
 - `ADMIN` — стандартная админка.
@@ -117,6 +122,28 @@ Dev-вход:
 - `ADMIN_TOKENS=token3,token4`
 
 Если один и тот же токен случайно указан в обоих списках, API пишет warning и считает его `SYS_ADMIN`.
+
+### Как зайти с двумя ролями (`ADMIN` и `SYS_ADMIN`)
+
+1. Поднимите проект и убедитесь, что API/WEB запущены.
+2. Один раз выполните seed с двумя парами логинов:
+
+   ```bash
+   SEED_ADMIN=true \
+   SYS_ADMIN_EMAIL=owner@example.com SYS_ADMIN_PASSWORD=owner123 \
+   ADMIN_EMAIL=manager@example.com ADMIN_PASSWORD=manager123 \
+     docker compose run --rm seed
+   ```
+
+3. Вход как `SYS_ADMIN`: `owner@example.com` / `owner123`.
+4. Вход как `ADMIN`: `manager@example.com` / `manager123`.
+5. Проверка роли:
+   - у `SYS_ADMIN` есть вкладка **«Логи»** (`/admin/logs`),
+   - у `ADMIN` этой вкладки нет.
+
+Важно:
+- если `SYS_ADMIN_*` не заданы, для обратной совместимости `ADMIN_*` создадут именно `SYS_ADMIN`.
+- если `ADMIN_EMAIL` совпадает с `SYS_ADMIN_EMAIL`, будет создан только один пользователь с ролью `SYS_ADMIN`.
 
 Возможности:
 - управление услугами (включая скидки) и категориями

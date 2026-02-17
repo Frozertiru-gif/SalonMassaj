@@ -11,6 +11,7 @@
 ## Быстрый старт (Docker Compose)
 
 ```bash
+cp .env.example .env
 docker compose up -d --build
 ```
 
@@ -67,41 +68,28 @@ npm run dev
 
 ## Переменные окружения
 
-### `/api/.env` (локальный запуск)
+### Docker Compose (`/.env`)
 
-Смотрите `.env.example`, дополнительно для dev:
-- `DATABASE_URL`
-- `JWT_SECRET`
-- `JWT_EXPIRES_MINUTES`
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_WEBHOOK_SECRET`
-- `TELEGRAM_BOT_USERNAME`
-- `TELEGRAM_ADMIN_IDS`
-- `TELEGRAM_SYS_ADMIN_IDS`
-- `ADMIN_EMAIL`
-- `ADMIN_PASSWORD`
-- `SEED_ADMIN`
-- `SYS_ADMIN_TOKENS` (или `SYS_ADMIN_API_KEYS`)
-- `ADMIN_TOKENS` (или `ADMIN_API_KEYS`)
+- `api`, `migrate`, `seed` читают переменные из `/.env`.
+- Для Docker `DATABASE_URL` должен указывать на сервис Postgres `db`:
+  - `postgresql+asyncpg://postgres:postgres@db:5432/salon`
+- Быстрый старт: `cp .env.example .env`.
 
-### `/web/.env.local` (локальный запуск)
+### Локальный запуск API вне Docker (`/api/.env`)
 
-Смотрите `.env.example`:
+- Шаблон: `/api/.env.example`.
+- Для локального запуска `DATABASE_URL` должен указывать на `localhost`:
+  - `postgresql+asyncpg://postgres:postgres@localhost:5432/salon`
+
+### `/web/.env.local` (локальный запуск web)
+
+Смотрите `web/.env.example`:
 - `API_INTERNAL_BASE_URL`
 
-### Docker Compose (.env в корне проекта)
+### Backup env (`/api/scripts/backup.env`)
 
-Минимум:
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_WEBHOOK_SECRET`
-- `TELEGRAM_BOT_USERNAME`
-- `TELEGRAM_ADMIN_IDS`
-- `TELEGRAM_SYS_ADMIN_IDS`
-- `TELEGRAM_MODE` (`polling` для локального Docker, `webhook` для публичного HTTPS URL)
-- `LOG_LEVEL` (`INFO` для подробных логов Telegram)
-- `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
-- `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `SEED_ADMIN` (dev seed администратора)
-- `SYS_ADMIN_TOKENS`, `ADMIN_TOKENS` (доступ в web-админку по токенам/ключам)
+- Шаблон: `/api/scripts/backup.env.example`.
+- `DATABASE_URL` в backup env должен совпадать с Docker-конфигом и использовать `@db:5432`.
 
 ## Админка
 

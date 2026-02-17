@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     telegram_admin_ids: str | None = None
     telegram_sys_admin_ids: str | None = None
     telegram_mode: str = "webhook"
-    backup_enabled: bool = True
+    backup_enabled: bool = False
     backup_chat_id: int | None = None
     backup_dir: str = "/app/backups"
     backup_script_path: str = "/app/scripts/backup_db.sh"
@@ -63,6 +63,24 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_tokens(cls, value: str | list[str] | None) -> list[str]:
         return _parse_csv_tokens(value)
+
+    @field_validator("backup_chat_id", mode="before")
+    @classmethod
+    def _normalize_backup_chat_id(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            return stripped
+        return value
+
+    @model_validator(mode="after")
+    def _validate_backup_configuration(self) -> "Settings":
+        if self.backup_enabled and self.backup_chat_id is None:
+            raise ValueError("BACKUP_CHAT_ID must be configured when BACKUP_ENABLED=true")
+        return self
 
     @model_validator(mode="after")
     def _warn_on_admin_token_overlap(self) -> "Settings":

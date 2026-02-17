@@ -3,6 +3,7 @@ import fcntl
 import json
 import logging
 import os
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -51,9 +52,11 @@ class BackupService:
             if backup_env_path.exists():
                 env.update(self._read_env_file(backup_env_path))
 
+            bash_path, script_path = self._validate_backup_runtime()
+
             process = await asyncio.create_subprocess_exec(
-                "bash",
-                settings.backup_script_path,
+                bash_path,
+                str(script_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
@@ -66,6 +69,27 @@ class BackupService:
             return self.get_latest_metadata()
 
         return await self._with_operation_lock(_run)
+
+    def _validate_backup_runtime(self) -> tuple[str, Path]:
+        bash_path = shutil.which("bash")
+        script_path = Path(settings.backup_script_path)
+
+        validation_errors: list[str] = []
+        if not bash_path:
+            validation_errors.append("bash is not available in PATH")
+        if not script_path.exists():
+            validation_errors.append(f"backup script not found: {script_path}")
+        elif not script_path.is_file():
+            validation_errors.append(f"backup script path is not a file: {script_path}")
+        elif not os.access(script_path, os.X_OK):
+            validation_errors.append(f"backup script is not executable: {script_path}")
+
+        if validation_errors:
+            message = "Backup runtime validation failed: " + "; ".join(validation_errors)
+            logger.error(message)
+            raise RuntimeError(message)
+
+        return bash_path, script_path
 
     def get_latest_metadata(self) -> dict[str, Any]:
         if self.metadata_path.exists():

@@ -1,7 +1,8 @@
 import logging
+import json
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, DotEnvSettingsSource, EnvSettingsSource, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +13,21 @@ def _parse_csv_tokens(value: str | list[str] | None) -> list[str]:
     if isinstance(value, list):
         candidates = value
     else:
-        candidates = value.split(",")
+        raw_value = value.strip()
+        if not raw_value:
+            return []
+        if raw_value.startswith("["):
+            try:
+                parsed_value = json.loads(raw_value)
+            except json.JSONDecodeError:
+                candidates = raw_value.split(",")
+            else:
+                if isinstance(parsed_value, list):
+                    candidates = [str(item) for item in parsed_value]
+                else:
+                    candidates = [raw_value]
+        else:
+            candidates = raw_value.split(",")
     cleaned: list[str] = []
     seen: set[str] = set()
     for item in candidates:
@@ -24,8 +39,50 @@ def _parse_csv_tokens(value: str | list[str] | None) -> list[str]:
     return cleaned
 
 
+class _TokenSafeEnvSettingsSource(EnvSettingsSource):
+    _token_fields = {"sys_admin_tokens", "admin_tokens"}
+
+    def prepare_field_value(self, field_name, field, value, value_is_complex):
+        if field_name in self._token_fields and isinstance(value, str):
+            return value
+        return super().prepare_field_value(field_name, field, value, value_is_complex)
+
+
+class _TokenSafeDotEnvSettingsSource(DotEnvSettingsSource):
+    _token_fields = {"sys_admin_tokens", "admin_tokens"}
+
+    def prepare_field_value(self, field_name, field, value, value_is_complex):
+        if field_name in self._token_fields and isinstance(value, str):
+            return value
+        return super().prepare_field_value(field_name, field, value, value_is_complex)
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        enable_decoding=False,
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return (
+            init_settings,
+            _TokenSafeEnvSettingsSource(settings_cls),
+            _TokenSafeDotEnvSettingsSource(
+                settings_cls,
+                env_file=cls.model_config.get("env_file"),
+                env_file_encoding=cls.model_config.get("env_file_encoding"),
+            ),
+            file_secret_settings,
+        )
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@db:5432/salon"
     jwt_secret: str = "change-me"

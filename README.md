@@ -111,7 +111,9 @@ Dev-вход:
 - `SYS_ADMIN` — все права `ADMIN` + вкладка `Логи` (`/admin/logs`) и доступ к `GET /admin/logs`.
 
 Роль для токена админки задаётся только через ENV:
-- `SYS_ADMIN_TOKENS=token1,token2`
+- `SYS_ADMIN_TOKENS=` — пустой список токенов
+- `SYS_ADMIN_TOKENS=token1,token2` — CSV
+- `SYS_ADMIN_TOKENS=["token1","token2"]` — JSON-массив
 - `ADMIN_TOKENS=token3,token4`
 
 Если один и тот же токен случайно указан в обоих списках, API пишет warning и считает его `SYS_ADMIN`.

@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     telegram_admin_ids: str | None = None
     telegram_sys_admin_ids: str | None = None
     telegram_mode: str = "webhook"
+    backup_enabled: bool = True
+    backup_chat_id: int | None = None
+    backup_dir: str = "/app/backups"
+    backup_script_path: str = "/app/scripts/backup_db.sh"
+    backup_env_path: str = "/app/scripts/backup.env"
+    backup_passphrase: str | None = None
+    backup_cron_hour: int = 3
+    backup_cron_minute: int = 15
     log_level: str = "INFO"
     sys_admin_tokens: list[str] = Field(
         default_factory=list,

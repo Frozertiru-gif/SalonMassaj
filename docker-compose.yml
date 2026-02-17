@@ -29,6 +29,13 @@ services:
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
       TELEGRAM_MODE: ${TELEGRAM_MODE:-polling}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_CHAT_ID: ${BACKUP_CHAT_ID:-}
+      BACKUP_DIR: /app/backups
+      BACKUP_SCRIPT_PATH: /app/scripts/backup_db.sh
+      BACKUP_ENV_PATH: /app/scripts/backup.env
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:-}
+      RETENTION_KEEP: ${RETENTION_KEEP:-7}
       PYTHONPATH: /app
     depends_on:
       db:
@@ -37,6 +44,8 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./api:/app
+      - ./api/backups:/app/backups
+      - ./api/scripts:/app/scripts
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -59,6 +68,8 @@ services:
         condition: service_healthy
     volumes:
       - ./api:/app
+      - ./api/backups:/app/backups
+      - ./api/scripts:/app/scripts
     command: sh -c "alembic upgrade head"
 
   seed:
@@ -78,6 +89,8 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./api:/app
+      - ./api/backups:/app/backups
+      - ./api/scripts:/app/scripts
     command: sh -c "python -m app.scripts.seed_admin"
 
   web:

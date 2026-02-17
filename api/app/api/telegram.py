@@ -13,6 +13,7 @@ from app.db import get_db
 from app.models import AdminRole, AuditActorType, Booking, BookingStatus, Master
 from app.services.access import resolve_telegram_role
 from app.services.audit import log_event
+from app.services.backup_service import BackupBusyError, backup_service
 from app.services.telegram import (
     answer_callback_query,
     booking_admin_text,
@@ -31,17 +32,21 @@ logger = logging.getLogger(__name__)
 ADMIN_MENU = "Выберите действие (нажмите кнопку ниже):\n• Новые записи\n• Ожидают подтверждения\n• Мастера\n• Помощь"
 MASTER_MENU = "Раздел мастера:\n• Мои заявки\n• Помощь"
 MASTER_PAGE_SIZE = 10
+BACKUP_MENU_LABEL = "🛡 Резервные копии"
+PENDING_RESTORE_FILE_IDS: dict[int, str] = {}
 
 ADMIN_ACTION_ALIASES: dict[str, set[str]] = {
     "new": {"новые записи", "новые"},
     "pending": {"ожидают подтверждения", "ожидают", "ожидание"},
     "masters": {"мастера", "мастеры", "мастера список"},
     "help": {"помощь", "help", "/help"},
+    "backup": {"🛡 резервные копии", "резервные копии", "backup"},
 }
 
 MASTER_ACTION_ALIASES: dict[str, set[str]] = {
     "my": {"мои заявки", "/my", "my"},
     "help": {"помощь", "help", "/help"},
+    "backup": {"🛡 резервные копии", "резервные копии", "backup"},
 }
 
 
@@ -60,12 +65,15 @@ class TelegramAccessContext:
         return self.master is not None
 
 
-def _admin_reply_keyboard() -> dict[str, Any]:
+def _admin_reply_keyboard(role: AdminRole | None = None) -> dict[str, Any]:
+    keyboard = [
+        [{"text": "Новые записи"}, {"text": "Ожидают подтверждения"}],
+        [{"text": "Мастера"}, {"text": "Помощь"}],
+    ]
+    if role == AdminRole.sys_admin:
+        keyboard.append([{"text": BACKUP_MENU_LABEL}])
     return {
-        "keyboard": [
-            [{"text": "Новые записи"}, {"text": "Ожидают подтверждения"}],
-            [{"text": "Мастера"}, {"text": "Помощь"}],
-        ],
+        "keyboard": keyboard,
         "resize_keyboard": True,
         "one_time_keyboard": False,
     }
@@ -273,6 +281,96 @@ async def _handle_master_message(db: AsyncSession, chat_id: int, text: str, mast
     await send_message(chat_id=chat_id, text="Доступные действия: «Мои заявки», «Помощь».", reply_markup=_master_reply_keyboard())
 
 
+def _is_private_chat(message: dict[str, Any]) -> bool:
+    return ((message.get("chat") or {}).get("type") == "private")
+
+
+def _backup_menu_markup(has_pending_upload: bool = False) -> dict[str, Any]:
+    rows = [
+        [{"text": "📦 Статус", "callback_data": "bk:status"}],
+        [{"text": "▶ Сделать сейчас", "callback_data": "bk:run"}],
+        [{"text": "📤 Отправить в backup-чат", "callback_data": "bk:send"}],
+        [{"text": "♻ Восстановить последний", "callback_data": "bk:restore_latest:confirm"}],
+    ]
+    if has_pending_upload:
+        rows.append([{"text": "📥 Подтвердить восстановление из файла", "callback_data": "bk:restore_file:confirm"}])
+    rows.append([{"text": "🛑 Отмена", "callback_data": "bk:cancel"}])
+    return {"inline_keyboard": rows}
+
+
+async def _send_backup_menu(chat_id: int, actor_tg_user_id: int) -> None:
+    has_pending = actor_tg_user_id in PENDING_RESTORE_FILE_IDS
+    await send_message(chat_id=chat_id, text="Управление резервными копиями.", reply_markup=_backup_menu_markup(has_pending_upload=has_pending))
+
+
+async def _handle_backup_callback(callback_id: str | None, data: str, message: dict[str, Any], actor_tg_user_id: int) -> bool:
+    if not data.startswith("bk:"):
+        return False
+
+    action = data.split(":")
+    chat_id = (message.get("chat") or {}).get("id")
+    if chat_id is None:
+        if callback_id:
+            await answer_callback_query(callback_id, "Не удалось определить чат")
+        return True
+
+    if action[1] == "status":
+        metadata = backup_service.get_latest_metadata()
+        if not metadata:
+            await send_message(chat_id=chat_id, text="Резервных копий пока нет.")
+        else:
+            await send_message(
+                chat_id=chat_id,
+                text=(
+                    f"Последняя копия: {metadata.get('filename')}\n"
+                    f"Создана: {metadata.get('created_at')}\n"
+                    f"Размер: {metadata.get('size_bytes')} байт"
+                ),
+            )
+    elif action[1] == "run":
+        try:
+            metadata = await backup_service.run_backup_script()
+            await send_message(chat_id=chat_id, text=f"Бэкап создан: {metadata.get('filename')}")
+        except BackupBusyError:
+            await send_message(chat_id=chat_id, text="Операция уже выполняется. Попробуйте позже.")
+        except Exception as exc:  # noqa: BLE001
+            await send_message(chat_id=chat_id, text=f"Ошибка бэкапа: {exc}")
+    elif action[1] == "send":
+        try:
+            await backup_service.send_latest_to_backup_chat()
+            await send_message(chat_id=chat_id, text="Файл отправлен в backup-чат.")
+        except Exception as exc:  # noqa: BLE001
+            await send_message(chat_id=chat_id, text=f"Ошибка отправки: {exc}")
+    elif action[1] == "restore_latest" and len(action) > 2 and action[2] == "confirm":
+        try:
+            await backup_service.restore_latest_local_backup(actor_tg_user_id=actor_tg_user_id)
+            await send_message(chat_id=chat_id, text="Восстановление из последнего локального бэкапа завершено.")
+        except BackupBusyError:
+            await send_message(chat_id=chat_id, text="Операция уже выполняется. Попробуйте позже.")
+        except Exception as exc:  # noqa: BLE001
+            await send_message(chat_id=chat_id, text=f"Ошибка восстановления: {exc}")
+    elif action[1] == "restore_file" and len(action) > 2 and action[2] == "confirm":
+        file_id = PENDING_RESTORE_FILE_IDS.get(actor_tg_user_id)
+        if not file_id:
+            await send_message(chat_id=chat_id, text="Сначала отправьте файл .dump.gpg документом.")
+        else:
+            try:
+                await backup_service.restore_from_uploaded_document(file_id=file_id, actor_tg_user_id=actor_tg_user_id)
+                await send_message(chat_id=chat_id, text="Восстановление из загруженного файла завершено.")
+                PENDING_RESTORE_FILE_IDS.pop(actor_tg_user_id, None)
+            except BackupBusyError:
+                await send_message(chat_id=chat_id, text="Операция уже выполняется. Попробуйте позже.")
+            except Exception as exc:  # noqa: BLE001
+                await send_message(chat_id=chat_id, text=f"Ошибка восстановления: {exc}")
+    elif action[1] == "cancel":
+        PENDING_RESTORE_FILE_IDS.pop(actor_tg_user_id, None)
+        await send_message(chat_id=chat_id, text="Действие отменено.")
+
+    if callback_id:
+        await answer_callback_query(callback_id)
+    return True
+
+
 @router.get("/telegram/health")
 async def telegram_health() -> dict[str, bool]:
     return {"ok": True}
@@ -330,7 +428,7 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
         await send_message(
             chat_id=telegram_user_id,
             text=f"✅ Доступ разрешен. Ваша роль: {access.admin_role.value}\n\n{ADMIN_MENU}",
-            reply_markup=_admin_reply_keyboard(),
+            reply_markup=_admin_reply_keyboard(access.admin_role),
         )
         return
 
@@ -358,7 +456,7 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
                 await send_message(chat_id=telegram_user_id, text="Код привязки не найден или устарел.")
 
         if access.is_admin:
-            await send_message(chat_id=telegram_user_id, text=ADMIN_MENU, reply_markup=_admin_reply_keyboard())
+            await send_message(chat_id=telegram_user_id, text=ADMIN_MENU, reply_markup=_admin_reply_keyboard(access.admin_role))
             return
 
         if access.is_master:
@@ -369,6 +467,20 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
         logger.info("tg_access denied user_id=%s", telegram_user_id)
         await send_message(chat_id=telegram_user_id, text="Нет доступа. Используйте /start <token> для привязки Telegram к мастеру.")
         return
+
+
+    if access.admin_role == AdminRole.sys_admin and _is_private_chat(message):
+        document = message.get("document") or {}
+        file_id = document.get("file_id")
+        file_name = str(document.get("file_name") or "")
+        if file_id:
+            PENDING_RESTORE_FILE_IDS[telegram_user_id] = str(file_id)
+            await send_message(
+                chat_id=telegram_user_id,
+                text=f"Файл {file_name or 'документ'} принят. Подтвердите восстановление кнопкой в меню бэкапов.",
+            )
+            await _send_backup_menu(chat_id=telegram_user_id, actor_tg_user_id=telegram_user_id)
+            return
 
     if access.is_admin:
         normalized_text = _normalize_action_text(text)
@@ -382,9 +494,14 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
             text_rows = [f"• {m.name} (id={m.id})" for m in masters] or ["Активные мастера не найдены."]
             await send_message(chat_id=int(chat_id), text="\n".join(text_rows))
         elif normalized_text in ADMIN_ACTION_ALIASES["help"]:
-            await send_message(chat_id=int(chat_id), text="Используйте кнопки: Новые записи / Ожидают подтверждения / Мастера", reply_markup=_admin_reply_keyboard())
+            await send_message(chat_id=int(chat_id), text="Используйте кнопки: Новые записи / Ожидают подтверждения / Мастера", reply_markup=_admin_reply_keyboard(access.admin_role))
+        elif normalized_text in ADMIN_ACTION_ALIASES["backup"]:
+            if access.admin_role != AdminRole.sys_admin or not _is_private_chat(message):
+                await send_message(chat_id=int(chat_id), text="Раздел резервных копий доступен только SYS_ADMIN в личном чате.")
+            else:
+                await _send_backup_menu(chat_id=int(chat_id), actor_tg_user_id=telegram_user_id)
         else:
-            await send_message(chat_id=int(chat_id), text="Не понял команду. Выберите действие кнопкой ниже.", reply_markup=_admin_reply_keyboard())
+            await send_message(chat_id=int(chat_id), text="Не понял команду. Выберите действие кнопкой ниже.", reply_markup=_admin_reply_keyboard(access.admin_role))
         return
 
     if access.is_master:
@@ -429,6 +546,31 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
         if callback_id:
             await answer_callback_query(callback_id)
         return
+
+    callback_chat = message.get("chat") or {}
+    if str(data or "").startswith("bk:"):
+        if access.admin_role != AdminRole.sys_admin or callback_chat.get("type") != "private":
+            if callback_id:
+                await answer_callback_query(callback_id, "Нет доступа")
+            return
+        handled = await _handle_backup_callback(
+            callback_id=callback_id,
+            data=str(data),
+            message=message,
+            actor_tg_user_id=int(actor_tg_user_id),
+        )
+        if handled:
+            await log_event(
+                db,
+                actor_type=AuditActorType.telegram,
+                actor_tg_user_id=int(actor_tg_user_id),
+                actor_role=access.admin_role,
+                action="backup.callback_action",
+                entity_type="backup",
+                entity_id=None,
+                meta={"callback_data": str(data)},
+            )
+            return
 
     if not access.is_admin:
         logger.info("tg_admin denied user_id=%s", actor_tg_user_id)

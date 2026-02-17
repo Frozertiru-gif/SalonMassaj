@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     backup_passphrase: str | None = None
     backup_cron_hour: int = 3
     backup_cron_minute: int = 15
+    retention_keep: int = Field(
+        default=7,
+        validation_alias=AliasChoices("RETENTION_KEEP", "retention_keep"),
+    )
     log_level: str = "INFO"
     sys_admin_tokens: list[str] = Field(
         default_factory=list,

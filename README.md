@@ -78,6 +78,10 @@ npm run dev
 ### Локальный запуск API вне Docker (`/api/.env`)
 
 - Шаблон: `/api/.env.example`.
+- Файл `api/.env.example` намеренно минимальный: в нём только значения,
+  которые обычно отличаются от корневого `/.env`.
+- Остальные переменные можно копировать из `/.env.example` по мере необходимости.
+- `ADMIN_EMAIL`/`ADMIN_PASSWORD` не являются обязательной зависимостью `api/.env`: они нужны только для seed и обычно передаются инлайн в команде запуска.
 - Для локального запуска `DATABASE_URL` должен указывать на `localhost`:
   - `postgresql+asyncpg://postgres:postgres@localhost:5432/salon`
 

@@ -76,12 +76,12 @@ services:
 
         with engine.connect() as conn:
             ok = conn.execute(
-                text(
-                    "SELECT 1 FROM information_schema.columns "
-                    "WHERE table_schema = current_schema() "
-                    "AND table_name = 'masters' "
-                    "AND column_name = 'telegram_chat_id'"
-                )
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = ANY (current_schemas(false)) "
+                "AND table_name = 'masters' "
+                "AND column_name = 'telegram_chat_id'"
+            )
             ).scalar()
 
         if ok != 1:

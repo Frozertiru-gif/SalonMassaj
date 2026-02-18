@@ -16,11 +16,32 @@ branch_labels = None
 depends_on = None
 
 
+def _column_exists(table_name: str, column_name: str) -> bool:
+    bind = op.get_bind()
+    return bool(
+        bind.execute(
+            sa.text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = ANY (current_schemas(false))
+                      AND table_name = :table_name
+                      AND column_name = :column_name
+                )
+                """
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).scalar()
+    )
+
+
 def upgrade() -> None:
     op.execute(sa.text("ALTER TABLE masters ADD COLUMN IF NOT EXISTS telegram_chat_id BIGINT"))
     op.execute(sa.text("ALTER TABLE masters ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(255)"))
 
-    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_masters_telegram_user_id ON masters (telegram_user_id)"))
+    if _column_exists("masters", "telegram_user_id"):
+        op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_masters_telegram_user_id ON masters (telegram_user_id)"))
     op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_masters_telegram_chat_id ON masters (telegram_chat_id)"))
 
 

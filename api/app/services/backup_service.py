@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -53,7 +54,13 @@ class BackupService:
                 env.update(self._read_env_file(backup_env_path))
 
             script_path, bash_path = self._validate_backup_runtime()
-            logger.info("backup.runtime bash=%s script=%s", bash_path, script_path)
+            script_head = self._read_script_head(script_path)
+            logger.info(
+                "backup.runtime launch bash=%s script=%s head=%s",
+                bash_path,
+                script_path,
+                script_head,
+            )
 
             process = await asyncio.create_subprocess_exec(
                 bash_path,
@@ -73,9 +80,11 @@ class BackupService:
 
     def _validate_backup_runtime(self) -> tuple[Path, str]:
         script_path = Path(settings.backup_script_path)
-        bash_path = self._resolve_bash()
+        bash_path = shutil.which("bash")
 
         validation_errors: list[str] = []
+        if not bash_path:
+            validation_errors.append("bash is required to run backup script")
         if not script_path.exists():
             validation_errors.append(f"backup script not found: {script_path}")
         elif not script_path.is_file():
@@ -86,24 +95,35 @@ class BackupService:
             logger.error(message)
             raise RuntimeError(message)
 
-        return script_path, bash_path
+        logger.info("backup.runtime resolved bash=%s", bash_path)
+        self._check_bash_pipefail(str(bash_path))
+        self._log_script_diagnostics(script_path)
+        return script_path, str(bash_path)
 
     @staticmethod
-    def _resolve_bash() -> str:
-        bash_path = shutil.which("bash")
-        if not bash_path:
-            message = "bash is required to run backup script"
+    def _check_bash_pipefail(bash_path: str) -> None:
+        check = subprocess.run(
+            [bash_path, "-lc", "set -o pipefail"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if check.returncode != 0:
+            stderr = (check.stderr or "").strip()
+            message = f"bash self-check failed for pipefail: {stderr or 'unknown error'}"
             logger.error(message)
             raise RuntimeError(message)
 
-        shell_name = Path(bash_path).name
-        if shell_name != "bash" or shell_name in {"sh", "dash"}:
-            message = f"bash executable is invalid: {bash_path}"
-            logger.error(message)
-            raise RuntimeError(message)
+    @staticmethod
+    def _read_script_head(script_path: Path) -> list[str]:
+        return script_path.read_text(encoding="utf-8", errors="replace").splitlines()[:2]
 
-        logger.info("backup.runtime resolved bash=%s", bash_path)
-        return bash_path
+    def _log_script_diagnostics(self, script_path: Path) -> None:
+        script_bytes = script_path.read_bytes()
+        if b"\r\n" in script_bytes:
+            logger.warning("backup script has CRLF line endings path=%s", script_path)
+
+        logger.info("backup.script head path=%s head=%s", script_path, self._read_script_head(script_path))
 
     def get_latest_metadata(self) -> dict[str, Any]:
         if self.metadata_path.exists():

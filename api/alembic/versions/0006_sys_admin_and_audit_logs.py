@@ -19,21 +19,22 @@ depends_on = None
 def upgrade() -> None:
     bind = op.get_bind()
 
-    sys_admin_exists = bind.execute(
-        sa.text(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM pg_type t
-                JOIN pg_enum e ON e.enumtypid = t.oid
-                WHERE t.typname = 'adminrole'
-                  AND e.enumlabel = 'SYS_ADMIN'
+    with op.get_context().autocommit_block():
+        sys_admin_exists = bind.execute(
+            sa.text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_type t
+                    JOIN pg_enum e ON e.enumtypid = t.oid
+                    WHERE t.typname = 'adminrole'
+                      AND e.enumlabel = 'SYS_ADMIN'
+                )
+                """
             )
-            """
-        )
-    ).scalar()
-    if not sys_admin_exists:
-        op.execute("ALTER TYPE adminrole ADD VALUE 'SYS_ADMIN'")
+        ).scalar()
+        if not sys_admin_exists:
+            op.execute("ALTER TYPE adminrole ADD VALUE 'SYS_ADMIN'")
 
     admins_table_exists = bind.execute(
         sa.text("SELECT to_regclass('public.admins') IS NOT NULL")

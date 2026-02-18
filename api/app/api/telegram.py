@@ -1,6 +1,8 @@
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -33,7 +35,17 @@ ADMIN_MENU = "Выберите действие (нажмите кнопку н�
 MASTER_MENU = "Раздел мастера:\n• Мои заявки\n• Помощь"
 MASTER_PAGE_SIZE = 10
 BACKUP_MENU_LABEL = "🛡 Резервные копии"
-PENDING_RESTORE_FILE_IDS: dict[int, str] = {}
+@dataclass(slots=True)
+class PendingRestoreUpload:
+    awaiting_upload: bool = False
+    file_path: str | None = None
+    file_name: str | None = None
+    file_size_bytes: int | None = None
+    detected_type: str | None = None
+    uploaded_at_iso: str | None = None
+
+
+PENDING_RESTORE_UPLOADS: dict[int, PendingRestoreUpload] = {}
 
 ADMIN_ACTION_ALIASES: dict[str, set[str]] = {
     "new": {"новые записи", "новые"},
@@ -291,15 +303,43 @@ def _backup_menu_markup(has_pending_upload: bool = False) -> dict[str, Any]:
         [{"text": "▶ Сделать сейчас", "callback_data": "bk:run"}],
         [{"text": "📤 Отправить в backup-чат", "callback_data": "bk:send"}],
         [{"text": "♻ Восстановить последний", "callback_data": "bk:restore_latest:confirm"}],
+        [{"text": "📎 Восстановить из файла", "callback_data": "bk:restore_file:start"}],
     ]
     if has_pending_upload:
-        rows.append([{"text": "📥 Подтвердить восстановление из файла", "callback_data": "bk:restore_file:confirm"}])
+        rows.append([{"text": "✅ Подтвердить восстановление", "callback_data": "bk:restore_file:confirm"}])
     rows.append([{"text": "🛑 Отмена", "callback_data": "bk:cancel"}])
     return {"inline_keyboard": rows}
 
 
+def _detect_uploaded_restore_type(file_name: str) -> str:
+    lowered = file_name.lower()
+    if lowered.endswith(".gpg"):
+        return "gpg"
+    if lowered.endswith(".sql") or lowered.endswith(".sql.gz"):
+        return "sql"
+    if lowered.endswith(".dump") or lowered.endswith(".backup"):
+        return "custom"
+    return "unknown"
+
+
+def _format_file_size(size_bytes: int) -> str:
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes} B"
+    return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
+def _restore_confirmation_markup() -> dict[str, Any]:
+    return {
+        "inline_keyboard": [
+            [{"text": "✅ Подтвердить восстановление", "callback_data": "bk:restore_file:confirm"}],
+            [{"text": "❌ Отмена", "callback_data": "bk:cancel"}],
+        ]
+    }
+
+
 async def _send_backup_menu(chat_id: int, actor_tg_user_id: int) -> None:
-    has_pending = actor_tg_user_id in PENDING_RESTORE_FILE_IDS
+    pending = PENDING_RESTORE_UPLOADS.get(actor_tg_user_id)
+    has_pending = bool(pending and pending.file_path)
     await send_message(chat_id=chat_id, text="Управление резервными копиями.", reply_markup=_backup_menu_markup(has_pending_upload=has_pending))
 
 
@@ -349,26 +389,61 @@ async def _handle_backup_callback(callback_id: str | None, data: str, message: d
             await send_message(chat_id=chat_id, text="Операция уже выполняется. Попробуйте позже.")
         except Exception as exc:  # noqa: BLE001
             await send_message(chat_id=chat_id, text=f"Ошибка восстановления: {exc}")
+    elif action[1] == "restore_file" and len(action) > 2 and action[2] == "start":
+        pending = PENDING_RESTORE_UPLOADS.get(actor_tg_user_id) or PendingRestoreUpload()
+        pending.awaiting_upload = True
+        pending.file_path = None
+        pending.file_name = None
+        pending.file_size_bytes = None
+        pending.detected_type = None
+        pending.uploaded_at_iso = None
+        PENDING_RESTORE_UPLOADS[actor_tg_user_id] = pending
+        await send_message(
+            chat_id=chat_id,
+            text=(
+                "Отправьте файлом бэкап в этот чат. Поддерживается: .dump/.backup (pg_dump custom), .sql, .sql.gz, "
+                "а также .gpg (если используется шифрование). После загрузки бот попросит подтверждение."
+            ),
+        )
     elif action[1] == "restore_file" and len(action) > 2 and action[2] == "confirm":
-        file_id = PENDING_RESTORE_FILE_IDS.get(actor_tg_user_id)
-        if not file_id:
-            await send_message(chat_id=chat_id, text="Сначала отправьте файл .dump.gpg документом.")
+        pending = PENDING_RESTORE_UPLOADS.get(actor_tg_user_id)
+        if not pending or not pending.file_path:
+            await send_message(chat_id=chat_id, text="Сначала нажмите «📎 Восстановить из файла» и отправьте документ.")
         else:
-            try:
-                await backup_service.restore_from_uploaded_document(file_id=file_id, actor_tg_user_id=actor_tg_user_id)
-                await send_message(chat_id=chat_id, text="Восстановление из загруженного файла завершено.")
-                PENDING_RESTORE_FILE_IDS.pop(actor_tg_user_id, None)
-            except BackupBusyError:
-                await send_message(chat_id=chat_id, text="Операция уже выполняется. Попробуйте позже.")
-            except Exception as exc:  # noqa: BLE001
-                await send_message(chat_id=chat_id, text=f"Ошибка восстановления: {exc}")
+            restore_path = Path(pending.file_path)
+            restore_name = pending.file_name or restore_path.name
+            PENDING_RESTORE_UPLOADS.pop(actor_tg_user_id, None)
+            await send_message(chat_id=chat_id, text="Запускаю восстановление…")
+            asyncio.create_task(_run_restore_and_report(chat_id=chat_id, actor_tg_user_id=actor_tg_user_id, restore_path=restore_path, restore_name=restore_name))
     elif action[1] == "cancel":
-        PENDING_RESTORE_FILE_IDS.pop(actor_tg_user_id, None)
+        PENDING_RESTORE_UPLOADS.pop(actor_tg_user_id, None)
         await send_message(chat_id=chat_id, text="Действие отменено.")
 
     if callback_id:
         await answer_callback_query(callback_id)
     return True
+
+
+async def _run_restore_and_report(chat_id: int, actor_tg_user_id: int, restore_path: Path, restore_name: str) -> None:
+    try:
+        result = await backup_service.restore_from_path(
+            path=restore_path,
+            actor_tg_user_id=actor_tg_user_id,
+            source=f"telegram_upload:{restore_name}",
+        )
+        await send_message(
+            chat_id=chat_id,
+            text=(
+                "✅ Восстановление завершено\n"
+                f"Файл: {result.get('file')}\n"
+                f"Тип: {result.get('file_type')}\n"
+                f"Время: {result.get('duration_seconds')} сек"
+            ),
+        )
+    except BackupBusyError:
+        await send_message(chat_id=chat_id, text="Операция уже выполняется. Попробуйте позже.")
+    except Exception as exc:  # noqa: BLE001
+        await send_message(chat_id=chat_id, text=f"❌ Восстановление завершилось ошибкой: {exc}")
 
 
 @router.get("/telegram/health")
@@ -470,16 +545,51 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
 
 
     if access.admin_role == AdminRole.sys_admin and _is_private_chat(message):
-        document = message.get("document") or {}
-        file_id = document.get("file_id")
-        file_name = str(document.get("file_name") or "")
-        if file_id:
-            PENDING_RESTORE_FILE_IDS[telegram_user_id] = str(file_id)
+        pending = PENDING_RESTORE_UPLOADS.get(telegram_user_id)
+        if pending and pending.awaiting_upload:
+            document = message.get("document") or {}
+            file_id = document.get("file_id")
+            file_name = str(document.get("file_name") or "")
+            file_size = int(document.get("file_size") or 0)
+            if not file_id:
+                await send_message(chat_id=telegram_user_id, text="Ожидаю документ с файлом бэкапа.")
+                return
+
+            allowed_suffixes = (".dump", ".backup", ".sql", ".sql.gz", ".gpg")
+            lowered = file_name.lower()
+            if not lowered.endswith(allowed_suffixes):
+                await send_message(chat_id=telegram_user_id, text="Неподдерживаемый формат. Разрешено: .dump, .backup, .sql, .sql.gz, .gpg")
+                return
+
+            max_bytes = int(settings.restore_max_mb) * 1024 * 1024
+            if file_size and file_size > max_bytes:
+                await send_message(
+                    chat_id=telegram_user_id,
+                    text=f"Файл слишком большой: {_format_file_size(file_size)}. Лимит: {settings.restore_max_mb} MB.",
+                )
+                return
+
+            stored_path, actual_size = await backup_service.download_telegram_document(file_id=str(file_id), original_name=file_name or "restore_upload.bin")
+            detected_type = _detect_uploaded_restore_type(file_name or stored_path.name)
+            pending.awaiting_upload = False
+            pending.file_path = str(stored_path)
+            pending.file_name = file_name or stored_path.name
+            pending.file_size_bytes = actual_size
+            pending.detected_type = detected_type
+            pending.uploaded_at_iso = datetime.now(timezone.utc).isoformat()
+            PENDING_RESTORE_UPLOADS[telegram_user_id] = pending
+
             await send_message(
                 chat_id=telegram_user_id,
-                text=f"Файл {file_name or 'документ'} принят. Подтвердите восстановление кнопкой в меню бэкапов.",
+                text=(
+                    "Файл принят. Проверьте данные перед восстановлением:\n"
+                    f"Имя: {pending.file_name}\n"
+                    f"Размер: {_format_file_size(pending.file_size_bytes or actual_size)}\n"
+                    f"Тип: {pending.detected_type}\n"
+                    f"Загружен: {pending.uploaded_at_iso}"
+                ),
+                reply_markup=_restore_confirmation_markup(),
             )
-            await _send_backup_menu(chat_id=telegram_user_id, actor_tg_user_id=telegram_user_id)
             return
 
     if access.is_admin:

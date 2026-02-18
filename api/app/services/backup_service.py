@@ -1,5 +1,6 @@
 import asyncio
 import fcntl
+import gzip
 import json
 import logging
 import os
@@ -7,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -24,6 +26,16 @@ class BackupBusyError(RuntimeError):
     pass
 
 
+@dataclass(slots=True)
+class RestoreResult:
+    ok: bool
+    file: str
+    file_type: str
+    duration_seconds: float
+    removed_incompatible_sets: int = 0
+    stderr_tail: str | None = None
+
+
 class BackupService:
     CUSTOM_DUMP_MAGIC = b"PGDMP"
     TRANSACTION_TIMEOUT_SET_RE = re.compile(br"^\s*SET\s+transaction_timeout\s*(?:=|TO)\s*[^;]+;\s*$", re.IGNORECASE)
@@ -35,6 +47,8 @@ class BackupService:
         self.lock_file = self.backup_dir / ".backup.lock"
         self.metadata_path = self.backup_dir / "last_backup.json"
         self.restore_log_path = self.backup_dir / "restore.log"
+        self.restore_dir = self.backup_dir / "restores"
+        self.restore_dir.mkdir(parents=True, exist_ok=True)
 
     async def _with_operation_lock(self, coro):
         if self._async_lock.locked():
@@ -171,41 +185,68 @@ class BackupService:
             raise RuntimeError("No backups found")
         path = Path(str(metadata["path"]))
 
-        async def _run() -> dict[str, Any]:
-            result = await self._restore_from_file(path)
-            self._append_restore_log(actor_tg_user_id=actor_tg_user_id, source=f"local:{path.name}")
-            return result
-
-        return await self._with_operation_lock(_run)
+        return await self.restore_from_path(path=path, actor_tg_user_id=actor_tg_user_id, source=f"local:{path.name}")
 
     async def restore_from_uploaded_document(self, file_id: str, actor_tg_user_id: int) -> dict[str, Any]:
+        file_path, _ = await self.download_telegram_document(file_id=file_id, original_name=f"uploaded_{file_id}.gpg")
+        return await self.restore_from_path(path=file_path, actor_tg_user_id=actor_tg_user_id, source=f"telegram:{file_id}")
+
+    async def download_telegram_document(self, file_id: str, original_name: str) -> tuple[Path, int]:
+        file_info = await get_file(file_id)
+        info = (file_info or {}).get("result") or {}
+        file_path = info.get("file_path")
+        file_size = int(info.get("file_size") or 0)
+        if not file_path:
+            raise RuntimeError("Telegram file path is missing")
+
+        token = settings.telegram_bot_token
+        if not token:
+            raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured")
+
+        timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+        destination = self.restore_dir / f"restore_{timestamp}_{self._sanitize_filename(original_name)}"
+        url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            destination.write_bytes(response.content)
+
+        return destination, int(destination.stat().st_size or file_size)
+
+    async def restore_from_path(self, path: Path, actor_tg_user_id: int, source: str | None = None) -> dict[str, Any]:
         async def _run() -> dict[str, Any]:
-            file_info = await get_file(file_id)
-            file_path = ((file_info or {}).get("result") or {}).get("file_path")
-            if not file_path:
-                raise RuntimeError("Telegram file path is missing")
-
-            token = settings.telegram_bot_token
-            if not token:
-                raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured")
-
-            url = f"https://api.telegram.org/file/bot{token}/{file_path}"
-            temp_file = self.backup_dir / f"uploaded_{int(datetime.now(tz=timezone.utc).timestamp())}.dump.gpg"
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                temp_file.write_bytes(response.content)
-
+            started = datetime.now(tz=timezone.utc)
             try:
-                result = await self._restore_from_file(temp_file)
-                self._append_restore_log(actor_tg_user_id=actor_tg_user_id, source=f"telegram:{file_id}")
-                return result
-            finally:
-                temp_file.unlink(missing_ok=True)
+                result = await self._restore_from_file(path)
+            except Exception as exc:  # noqa: BLE001
+                stderr_tail = self._error_tail(str(exc))
+                logger.exception("backup.restore failed file=%s source=%s", path, source or f"path:{path.name}")
+                self._append_restore_log(actor_tg_user_id=actor_tg_user_id, source=source or f"path:{path.name}", status="error", detail=stderr_tail)
+                raise RuntimeError(stderr_tail) from exc
+
+            duration = (datetime.now(tz=timezone.utc) - started).total_seconds()
+            result.duration_seconds = duration
+            self._append_restore_log(
+                actor_tg_user_id=actor_tg_user_id,
+                source=source or f"path:{path.name}",
+                status="ok",
+                detail=f"type={result.file_type} removed_sets={result.removed_incompatible_sets} duration={duration:.2f}s",
+            )
+            return {
+                "ok": result.ok,
+                "file": result.file,
+                "file_type": result.file_type,
+                "duration_seconds": round(duration, 2),
+                "removed_incompatible_sets": result.removed_incompatible_sets,
+            }
 
         return await self._with_operation_lock(_run)
 
-    async def _restore_from_file(self, encrypted_dump_path: Path) -> dict[str, Any]:
+    async def _restore_from_file(self, input_path: Path) -> RestoreResult:
+        if not input_path.exists() or not input_path.is_file():
+            raise RuntimeError("Restore file is missing")
+
         env = os.environ.copy()
         backup_env_path = Path(settings.backup_env_path)
         if backup_env_path.exists():
@@ -214,25 +255,37 @@ class BackupService:
         database_url = env.get("DATABASE_URL") or settings.database_url
         db_host, db_port, db_name, db_user, db_password = self._parse_database_url(database_url)
         passphrase = env.get("BACKUP_PASSPHRASE") or settings.backup_passphrase
-        if not passphrase:
-            raise RuntimeError("BACKUP_PASSPHRASE is not configured")
 
         env["PGPASSWORD"] = db_password
+        removed_count = 0
+        detected_type = "unknown"
 
         with tempfile.TemporaryDirectory(prefix="restore_") as tmp_dir:
-            decrypted_dump_path = Path(tmp_dir) / "decrypted.dump"
-            await self._decrypt_backup(
-                encrypted_dump_path=encrypted_dump_path,
-                decrypted_dump_path=decrypted_dump_path,
-                passphrase=passphrase,
-            )
+            restore_input_path = input_path
+            if input_path.suffix.lower() == ".gpg":
+                if not passphrase:
+                    raise RuntimeError("BACKUP_PASSPHRASE is not configured")
+                decrypted_dump_path = Path(tmp_dir) / "decrypted.restore"
+                await self._decrypt_backup(
+                    encrypted_dump_path=input_path,
+                    decrypted_dump_path=decrypted_dump_path,
+                    passphrase=passphrase,
+                )
+                restore_input_path = decrypted_dump_path
 
-            dump_format = self._detect_dump_format(decrypted_dump_path)
-            logger.info("backup.restore format_detected format=%s file=%s", dump_format, encrypted_dump_path)
+            if restore_input_path.suffix.lower() == ".gz":
+                gunzipped_path = Path(tmp_dir) / "restore.sql"
+                with gzip.open(restore_input_path, "rb") as source, gunzipped_path.open("wb") as target:
+                    shutil.copyfileobj(source, target)
+                restore_input_path = gunzipped_path
+
+            dump_format = self._detect_dump_format(restore_input_path)
+            detected_type = dump_format
+            logger.info("backup.restore format_detected format=%s file=%s", dump_format, input_path)
 
             if dump_format == "custom":
                 stdout = await self._restore_custom_dump(
-                    dump_path=decrypted_dump_path,
+                    dump_path=restore_input_path,
                     db_host=db_host,
                     db_port=db_port,
                     db_user=db_user,
@@ -242,7 +295,7 @@ class BackupService:
             else:
                 filtered_sql_path = Path(tmp_dir) / "filtered.sql"
                 removed_count = self._filter_incompatible_sql_settings(
-                    source_path=decrypted_dump_path,
+                    source_path=restore_input_path,
                     target_path=filtered_sql_path,
                 )
                 if removed_count:
@@ -259,8 +312,16 @@ class BackupService:
                     env=env,
                 )
 
-        logger.info("backup.restore success file=%s stdout=%s", encrypted_dump_path, stdout)
-        return {"ok": True, "file": encrypted_dump_path.name}
+            await self._health_check_db(db_host=db_host, db_port=db_port, db_user=db_user, db_name=db_name, env=env)
+
+        logger.info("backup.restore success file=%s stdout=%s", input_path, stdout)
+        return RestoreResult(
+            ok=True,
+            file=input_path.name,
+            file_type=detected_type,
+            duration_seconds=0,
+            removed_incompatible_sets=removed_count,
+        )
 
     async def _decrypt_backup(self, encrypted_dump_path: Path, decrypted_dump_path: Path, passphrase: str) -> None:
         process = await asyncio.create_subprocess_exec(
@@ -348,6 +409,29 @@ class BackupService:
             raise RuntimeError(f"Restore failed: {(stderr or b'').decode().strip()}")
         return (stdout or b"").decode().strip()
 
+    async def _health_check_db(self, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> None:
+        process = await asyncio.create_subprocess_exec(
+            "psql",
+            "-h",
+            db_host,
+            "-p",
+            db_port,
+            "-U",
+            db_user,
+            "-d",
+            db_name,
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-Atqc",
+            "SELECT 1",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0 or (stdout or b"").decode().strip() != "1":
+            raise RuntimeError(f"Restore health-check failed: {(stderr or b'').decode().strip()}")
+
     @staticmethod
     def _read_env_file(path: Path) -> dict[str, str]:
         env_map: dict[str, str] = {}
@@ -397,11 +481,24 @@ class BackupService:
             except TelegramError:
                 logger.exception("backup.notify_sys_admin failed chat_id=%s", admin_id)
 
-    def _append_restore_log(self, actor_tg_user_id: int, source: str) -> None:
+    def _append_restore_log(self, actor_tg_user_id: int, source: str, status: str = "ok", detail: str | None = None) -> None:
         timestamp = datetime.now(tz=timezone.utc).isoformat()
         self.restore_log_path.parent.mkdir(parents=True, exist_ok=True)
         with self.restore_log_path.open("a", encoding="utf-8") as handle:
-            handle.write(f"{timestamp} actor={actor_tg_user_id} source={source}\n")
+            suffix = f" detail={detail}" if detail else ""
+            handle.write(f"{timestamp} actor={actor_tg_user_id} source={source} status={status}{suffix}\n")
+
+    @staticmethod
+    def _sanitize_filename(name: str) -> str:
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+        return safe or "upload.bin"
+
+    @staticmethod
+    def _error_tail(text: str, max_chars: int = 300) -> str:
+        compact = " ".join(text.split())
+        if len(compact) <= max_chars:
+            return compact
+        return f"…{compact[-max_chars:]}"
 
 
 backup_service = BackupService()

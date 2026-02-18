@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     backup_script_path: str = "/app/scripts/backup_db.sh"
     backup_env_path: str = "/app/scripts/backup.env"
     backup_passphrase: str | None = None
+    restore_max_mb: int = 200
     backup_cron_hour: int = 3
     backup_cron_minute: int = 15
     retention_keep: int = Field(

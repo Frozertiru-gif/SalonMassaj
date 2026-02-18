@@ -61,7 +61,32 @@ services:
       - ./api:/app
       - ./api/backups:/app/backups
       - ./api/scripts:/app/scripts
-    command: sh -c "alembic upgrade head"
+    command:
+      - sh
+      - -ec
+      - |
+        alembic upgrade head
+        python - <<'PY'
+        import os
+
+        from sqlalchemy import create_engine, text
+
+        database_url = os.environ['DATABASE_URL'].replace('+asyncpg', '+psycopg2')
+        engine = create_engine(database_url)
+
+        with engine.connect() as conn:
+            ok = conn.execute(
+                text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() "
+                    "AND table_name = 'masters' "
+                    "AND column_name = 'telegram_chat_id'"
+                )
+            ).scalar()
+
+        if ok != 1:
+            raise SystemExit('Post-migration check failed: masters.telegram_chat_id is missing')
+        PY
 
   seed:
     build:

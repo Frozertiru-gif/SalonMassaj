@@ -18,7 +18,6 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    ac = bind.execution_options(isolation_level="AUTOCOMMIT")
 
     sys_admin_exists = bind.execute(
         sa.text(
@@ -32,13 +31,7 @@ def upgrade() -> None:
         )
     ).scalar()
     if not sys_admin_exists:
-        ac.execute(sa.text("ALTER TYPE adminrole ADD VALUE 'SYS_ADMIN'"))
-
-    admins_table_exists = bind.execute(
-        sa.text("SELECT to_regclass('public.admins') IS NOT NULL")
-    ).scalar()
-    if admins_table_exists:
-        bind.execute(sa.text("UPDATE admins SET role = 'SYS_ADMIN' WHERE role = 'OWNER'"))
+        bind.execute(sa.text("ALTER TYPE adminrole ADD VALUE 'SYS_ADMIN'"))
 
     adminrole_enum = postgresql.ENUM(name="adminrole", create_type=False)
 
@@ -69,9 +62,3 @@ def downgrade() -> None:
     op.drop_index("ix_audit_logs_action", table_name="audit_logs")
     op.drop_index("ix_audit_logs_created_at", table_name="audit_logs")
     op.drop_table("audit_logs")
-    bind = op.get_bind()
-    admins_table_exists = bind.execute(
-        sa.text("SELECT to_regclass('public.admins') IS NOT NULL")
-    ).scalar()
-    if admins_table_exists:
-        op.execute("UPDATE admins SET role = 'OWNER' WHERE role = 'SYS_ADMIN'")

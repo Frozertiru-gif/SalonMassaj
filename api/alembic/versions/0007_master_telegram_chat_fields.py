@@ -1,7 +1,7 @@
 """add master telegram chat fields
 
 Revision ID: 0007
-Revises: 0006
+Revises: 0006a_update_admin_role_to_sys_admin
 Create Date: 2026-02-12 00:00:00
 """
 
@@ -10,43 +10,49 @@ import sqlalchemy as sa
 
 
 revision = "0007"
-down_revision = "0006"
+down_revision = "0006a_update_admin_role_to_sys_admin"
 branch_labels = None
 depends_on = None
 
 
-def _column_exists(table_name: str, column_name: str) -> bool:
+def _masters_schema() -> str:
     bind = op.get_bind()
-    return bool(
-        bind.execute(
-            sa.text(
-                """
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_schema = current_schema()
-                      AND table_name = :table_name
-                      AND column_name = :column_name
-                )
-                """
-            ),
-            {"table_name": table_name, "column_name": column_name},
-        ).scalar()
-    )
+    schema = bind.execute(
+        sa.text(
+            """
+            SELECT t.table_schema
+            FROM information_schema.tables AS t
+            WHERE t.table_name = 'masters'
+              AND t.table_type = 'BASE TABLE'
+              AND t.table_schema = ANY (current_schemas(false))
+            ORDER BY array_position(current_schemas(false), t.table_schema)
+            LIMIT 1
+            """
+        )
+    ).scalar()
+    return schema or "public"
+
+
+def _qualified_masters_table() -> str:
+    bind = op.get_bind()
+    schema = _masters_schema()
+    preparer = bind.dialect.identifier_preparer
+    return f"{preparer.quote(schema)}.{preparer.quote('masters')}"
 
 
 def upgrade() -> None:
-    op.execute(sa.text("ALTER TABLE masters ADD COLUMN IF NOT EXISTS telegram_chat_id BIGINT"))
-    op.execute(sa.text("ALTER TABLE masters ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(255)"))
+    masters_table = _qualified_masters_table()
 
-    if _column_exists("masters", "telegram_user_id"):
-        op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_masters_telegram_user_id ON masters (telegram_user_id)"))
-
-    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_masters_telegram_chat_id ON masters (telegram_chat_id)"))
+    op.execute(sa.text(f"ALTER TABLE {masters_table} ADD COLUMN IF NOT EXISTS telegram_chat_id BIGINT"))
+    op.execute(sa.text(f"ALTER TABLE {masters_table} ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(255)"))
+    op.execute(sa.text(f"CREATE INDEX IF NOT EXISTS ix_masters_telegram_user_id ON {masters_table} (telegram_user_id)"))
+    op.execute(sa.text(f"CREATE INDEX IF NOT EXISTS ix_masters_telegram_chat_id ON {masters_table} (telegram_chat_id)"))
 
 
 def downgrade() -> None:
+    masters_table = _qualified_masters_table()
+
     op.execute(sa.text("DROP INDEX IF EXISTS ix_masters_telegram_chat_id"))
     op.execute(sa.text("DROP INDEX IF EXISTS ix_masters_telegram_user_id"))
-    op.execute(sa.text("ALTER TABLE masters DROP COLUMN IF EXISTS telegram_username"))
-    op.execute(sa.text("ALTER TABLE masters DROP COLUMN IF EXISTS telegram_chat_id"))
+    op.execute(sa.text(f"ALTER TABLE {masters_table} DROP COLUMN IF EXISTS telegram_username"))
+    op.execute(sa.text(f"ALTER TABLE {masters_table} DROP COLUMN IF EXISTS telegram_chat_id"))

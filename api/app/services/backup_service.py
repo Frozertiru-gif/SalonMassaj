@@ -3,8 +3,10 @@ import fcntl
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,9 @@ class BackupBusyError(RuntimeError):
 
 
 class BackupService:
+    CUSTOM_DUMP_MAGIC = b"PGDMP"
+    TRANSACTION_TIMEOUT_SET_RE = re.compile(br"^\s*SET\s+transaction_timeout\s*(?:=|TO)\s*[^;]+;\s*$", re.IGNORECASE)
+
     def __init__(self) -> None:
         self._async_lock = asyncio.Lock()
         self.backup_dir = Path(settings.backup_dir)
@@ -213,15 +218,103 @@ class BackupService:
             raise RuntimeError("BACKUP_PASSPHRASE is not configured")
 
         env["PGPASSWORD"] = db_password
-        env["BACKUP_PASSPHRASE"] = passphrase
-        restore_cmd = (
-            f"gpg --batch --yes --decrypt --pinentry-mode loopback --passphrase \"$BACKUP_PASSPHRASE\" \"{encrypted_dump_path}\" "
-            f"| pg_restore --clean --if-exists --no-owner --no-privileges -h \"{db_host}\" -p \"{db_port}\" -U \"{db_user}\" -d \"{db_name}\""
-        )
+
+        with tempfile.TemporaryDirectory(prefix="restore_") as tmp_dir:
+            decrypted_dump_path = Path(tmp_dir) / "decrypted.dump"
+            await self._decrypt_backup(
+                encrypted_dump_path=encrypted_dump_path,
+                decrypted_dump_path=decrypted_dump_path,
+                passphrase=passphrase,
+            )
+
+            dump_format = self._detect_dump_format(decrypted_dump_path)
+            logger.info("backup.restore format_detected format=%s file=%s", dump_format, encrypted_dump_path)
+
+            if dump_format == "custom":
+                stdout = await self._restore_custom_dump(
+                    dump_path=decrypted_dump_path,
+                    db_host=db_host,
+                    db_port=db_port,
+                    db_user=db_user,
+                    db_name=db_name,
+                    env=env,
+                )
+            else:
+                filtered_sql_path = Path(tmp_dir) / "filtered.sql"
+                removed_count = self._filter_incompatible_sql_settings(
+                    source_path=decrypted_dump_path,
+                    target_path=filtered_sql_path,
+                )
+                if removed_count:
+                    logger.info(
+                        "backup.restore compatibility_filter removed=%s parameter=transaction_timeout reason=compat_with_pg",
+                        removed_count,
+                    )
+                stdout = await self._restore_plain_sql_dump(
+                    sql_path=filtered_sql_path,
+                    db_host=db_host,
+                    db_port=db_port,
+                    db_user=db_user,
+                    db_name=db_name,
+                    env=env,
+                )
+
+        logger.info("backup.restore success file=%s stdout=%s", encrypted_dump_path, stdout)
+        return {"ok": True, "file": encrypted_dump_path.name}
+
+    async def _decrypt_backup(self, encrypted_dump_path: Path, decrypted_dump_path: Path, passphrase: str) -> None:
         process = await asyncio.create_subprocess_exec(
-            "bash",
-            "-lc",
-            restore_cmd,
+            "gpg",
+            "--batch",
+            "--yes",
+            "--decrypt",
+            "--pinentry-mode",
+            "loopback",
+            "--passphrase",
+            passphrase,
+            "--output",
+            str(decrypted_dump_path),
+            str(encrypted_dump_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0:
+            raise RuntimeError(f"Restore failed during decrypt: {(stderr or b'').decode().strip()}")
+
+    def _detect_dump_format(self, decrypted_dump_path: Path) -> str:
+        with decrypted_dump_path.open("rb") as handle:
+            header = handle.read(len(self.CUSTOM_DUMP_MAGIC))
+        if header == self.CUSTOM_DUMP_MAGIC:
+            return "custom"
+        return "plain_sql"
+
+    def _filter_incompatible_sql_settings(self, source_path: Path, target_path: Path) -> int:
+        removed_count = 0
+        with source_path.open("rb") as source, target_path.open("wb") as target:
+            for raw_line in source:
+                if self.TRANSACTION_TIMEOUT_SET_RE.match(raw_line.rstrip(b"\r\n")):
+                    removed_count += 1
+                    continue
+                target.write(raw_line)
+        return removed_count
+
+    async def _restore_custom_dump(self, dump_path: Path, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> str:
+        process = await asyncio.create_subprocess_exec(
+            "pg_restore",
+            "--clean",
+            "--if-exists",
+            "--no-owner",
+            "--no-privileges",
+            "-h",
+            db_host,
+            "-p",
+            db_port,
+            "-U",
+            db_user,
+            "-d",
+            db_name,
+            str(dump_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
@@ -229,9 +322,31 @@ class BackupService:
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
             raise RuntimeError(f"Restore failed: {(stderr or b'').decode().strip()}")
+        return (stdout or b"").decode().strip()
 
-        logger.info("backup.restore success file=%s stdout=%s", encrypted_dump_path, (stdout or b"").decode().strip())
-        return {"ok": True, "file": encrypted_dump_path.name}
+    async def _restore_plain_sql_dump(self, sql_path: Path, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> str:
+        process = await asyncio.create_subprocess_exec(
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-h",
+            db_host,
+            "-p",
+            db_port,
+            "-U",
+            db_user,
+            "-d",
+            db_name,
+            "-f",
+            str(sql_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            raise RuntimeError(f"Restore failed: {(stderr or b'').decode().strip()}")
+        return (stdout or b"").decode().strip()
 
     @staticmethod
     def _read_env_file(path: Path) -> dict[str, str]:

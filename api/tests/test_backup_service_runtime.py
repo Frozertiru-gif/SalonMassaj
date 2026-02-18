@@ -41,7 +41,7 @@ class BackupServiceRuntimeValidationTests(unittest.TestCase):
         with patch.object(settings, "backup_script_path", str(script_path)), patch("app.services.backup_service.shutil.which", return_value="/usr/bin/bash"):
             validated = service._validate_backup_runtime()
 
-        self.assertEqual(validated, script_path)
+        self.assertEqual(validated, (script_path, "/usr/bin/bash"))
 
 
 if __name__ == "__main__":

@@ -15,39 +15,38 @@ branch_labels = None
 depends_on = None
 
 
-def _has_column(table_name: str, column_name: str) -> bool:
-    inspector = sa.inspect(op.get_bind())
-    return any(column["name"] == column_name for column in inspector.get_columns(table_name))
-
-
-def _has_index(table_name: str, index_name: str) -> bool:
-    inspector = sa.inspect(op.get_bind())
-    return any(index["name"] == index_name for index in inspector.get_indexes(table_name))
+def _column_exists(table_name: str, column_name: str) -> bool:
+    bind = op.get_bind()
+    return bool(
+        bind.execute(
+            sa.text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = :table_name
+                      AND column_name = :column_name
+                )
+                """
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).scalar()
+    )
 
 
 def upgrade() -> None:
-    if not _has_column("masters", "telegram_chat_id"):
-        op.add_column("masters", sa.Column("telegram_chat_id", sa.BigInteger(), nullable=True))
+    op.execute(sa.text("ALTER TABLE masters ADD COLUMN IF NOT EXISTS telegram_chat_id BIGINT"))
+    op.execute(sa.text("ALTER TABLE masters ADD COLUMN IF NOT EXISTS telegram_username VARCHAR(255)"))
 
-    if not _has_column("masters", "telegram_username"):
-        op.add_column("masters", sa.Column("telegram_username", sa.String(length=255), nullable=True))
+    if _column_exists("masters", "telegram_user_id"):
+        op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_masters_telegram_user_id ON masters (telegram_user_id)"))
 
-    if _has_column("masters", "telegram_user_id") and not _has_index("masters", "ix_masters_telegram_user_id"):
-        op.create_index("ix_masters_telegram_user_id", "masters", ["telegram_user_id"], unique=False)
-
-    if _has_column("masters", "telegram_chat_id") and not _has_index("masters", "ix_masters_telegram_chat_id"):
-        op.create_index("ix_masters_telegram_chat_id", "masters", ["telegram_chat_id"], unique=False)
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_masters_telegram_chat_id ON masters (telegram_chat_id)"))
 
 
 def downgrade() -> None:
-    if _has_index("masters", "ix_masters_telegram_chat_id"):
-        op.drop_index("ix_masters_telegram_chat_id", table_name="masters")
-
-    if _has_index("masters", "ix_masters_telegram_user_id"):
-        op.drop_index("ix_masters_telegram_user_id", table_name="masters")
-
-    if _has_column("masters", "telegram_username"):
-        op.drop_column("masters", "telegram_username")
-
-    if _has_column("masters", "telegram_chat_id"):
-        op.drop_column("masters", "telegram_chat_id")
+    op.execute(sa.text("DROP INDEX IF EXISTS ix_masters_telegram_chat_id"))
+    op.execute(sa.text("DROP INDEX IF EXISTS ix_masters_telegram_user_id"))
+    op.execute(sa.text("ALTER TABLE masters DROP COLUMN IF EXISTS telegram_username"))
+    op.execute(sa.text("ALTER TABLE masters DROP COLUMN IF EXISTS telegram_chat_id"))

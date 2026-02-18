@@ -45,6 +45,7 @@ docker compose run --rm migrate
 ```bash
 docker compose exec db psql -U postgres -d salon -c "SELECT version_num, pg_catalog.format_type(a.atttypid, a.atttypmod) AS version_type FROM alembic_version v JOIN pg_catalog.pg_attribute a ON a.attrelid = 'alembic_version'::regclass AND a.attname = 'version_num' LIMIT 1;"
 docker compose exec db psql -U postgres -d salon -c "\d masters"
+docker compose exec db psql -U postgres -d salon -c "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name='masters' AND column_name IN ('telegram_user_id','telegram_chat_id','telegram_username') ORDER BY column_name;"
 ```
 
 Ожидаемо:

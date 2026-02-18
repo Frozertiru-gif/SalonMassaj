@@ -52,10 +52,11 @@ class BackupService:
             if backup_env_path.exists():
                 env.update(self._read_env_file(backup_env_path))
 
-            script_path = self._validate_backup_runtime()
+            script_path, bash_path = self._validate_backup_runtime()
+            logger.info("backup.runtime bash=%s script=%s", bash_path, script_path)
 
             process = await asyncio.create_subprocess_exec(
-                "bash",
+                bash_path,
                 str(script_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -70,13 +71,9 @@ class BackupService:
 
         return await self._with_operation_lock(_run)
 
-    def _validate_backup_runtime(self) -> Path:
+    def _validate_backup_runtime(self) -> tuple[Path, str]:
         script_path = Path(settings.backup_script_path)
-
-        if not shutil.which("bash"):
-            message = "bash is required to run backup script"
-            logger.error(message)
-            raise RuntimeError(message)
+        bash_path = self._resolve_bash()
 
         validation_errors: list[str] = []
         if not script_path.exists():
@@ -89,7 +86,24 @@ class BackupService:
             logger.error(message)
             raise RuntimeError(message)
 
-        return script_path
+        return script_path, bash_path
+
+    @staticmethod
+    def _resolve_bash() -> str:
+        bash_path = shutil.which("bash")
+        if not bash_path:
+            message = "bash is required to run backup script"
+            logger.error(message)
+            raise RuntimeError(message)
+
+        shell_name = Path(bash_path).name
+        if shell_name != "bash" or shell_name in {"sh", "dash"}:
+            message = f"bash executable is invalid: {bash_path}"
+            logger.error(message)
+            raise RuntimeError(message)
+
+        logger.info("backup.runtime resolved bash=%s", bash_path)
+        return bash_path
 
     def get_latest_metadata(self) -> dict[str, Any]:
         if self.metadata_path.exists():

@@ -36,7 +36,9 @@ def _format_qualified_name(connection, schema: str | None, table: str) -> str:
 def _ensure_alembic_version_table(connection, schema: str | None) -> None:
     # Some local revision IDs are longer than 32 chars.
     # Keep alembic_version.version_num wide enough before migrations run.
-    table_schema = schema or "public"
+    # When version_table_schema is not configured, follow current_schema()
+    # so checks/DDL target the same table Alembic would use by default.
+    table_schema = schema or connection.execute(text("SELECT current_schema()")).scalar_one()
     qualified_table = _format_qualified_name(connection, schema, ALEMBIC_VERSION_TABLE)
 
     table_exists = connection.execute(

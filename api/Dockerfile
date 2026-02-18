@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN find /app -type f -name "*.sh" -print0 | xargs -0 sed -i 's/\r$//' \
-    && (chmod +x /app/scripts/*.sh || true)
+RUN find /app -type f -name "*.sh" -exec sed -i 's/\r$//' {} \; \
+    && chmod +x /app/scripts/*.sh || true
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

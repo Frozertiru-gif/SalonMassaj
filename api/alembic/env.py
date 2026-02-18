@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 ALEMBIC_VERSION_TABLE = "alembic_version"
-ALEMBIC_VERSION_COLUMN_LENGTH = 128
+ALEMBIC_VERSION_COLUMN_LENGTH = 255
 
 
 def _quote_ident(connection, ident: str) -> str:
@@ -36,12 +36,8 @@ def _format_qualified_name(connection, schema: str | None, table: str) -> str:
 def ensure_alembic_version_table(connection, schema: str | None, size: int = ALEMBIC_VERSION_COLUMN_LENGTH) -> None:
     # Some local revision IDs are longer than 32 chars.
     # Keep alembic_version.version_num wide enough before migrations run.
-    if schema:
-        table_schema = schema
-    else:
-        table_schema = connection.exec_driver_sql("SELECT current_schema()").scalar_one()
-
-    qualified_table = _format_qualified_name(connection, schema, ALEMBIC_VERSION_TABLE)
+    table_schema = schema or connection.exec_driver_sql("SELECT current_schema()").scalar_one()
+    qualified_table = _format_qualified_name(connection, table_schema, ALEMBIC_VERSION_TABLE)
 
     table_exists = connection.exec_driver_sql(
         """
@@ -64,11 +60,7 @@ def ensure_alembic_version_table(connection, schema: str | None, size: int = ALE
             )
             """
         )
-        logger.info(
-            "Created %s with version_num VARCHAR(%s)",
-            qualified_table,
-            size,
-        )
+        logger.info("Ensured %s in schema=%s with version_num_length=%s", qualified_table, table_schema, size)
         return
 
     column_info = connection.exec_driver_sql(
@@ -107,11 +99,13 @@ def ensure_alembic_version_table(connection, schema: str | None, size: int = ALE
         logger.info("Added missing %s.version_num column", qualified_table)
         return
 
+    current_length = column_info.character_maximum_length if column_info is not None else None
+
     needs_widening = (
         column_info
         and column_info.data_type in {"character varying", "character"}
-        and column_info.character_maximum_length is not None
-        and column_info.character_maximum_length < size
+        and current_length is not None
+        and current_length < size
     )
 
     if needs_widening:
@@ -121,13 +115,14 @@ def ensure_alembic_version_table(connection, schema: str | None, size: int = ALE
             ALTER COLUMN version_num TYPE VARCHAR({size})
             """
         )
-        logger.info(
-            "Updated %s.version_num to VARCHAR(%s)",
-            qualified_table,
-            size,
-        )
-    else:
-        logger.info("Checked %s.version_num (no change needed)", qualified_table)
+        current_length = size
+
+    logger.info(
+        "Checked %s (schema=%s), version_num_length=%s",
+        qualified_table,
+        table_schema,
+        current_length,
+    )
 
 
 def run_migrations_offline() -> None:

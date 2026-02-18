@@ -32,6 +32,25 @@ docker compose run --rm migrate
 
 Alembic использует синхронный драйвер (psycopg2), поэтому `psycopg2-binary` установлен в `api/requirements.txt`.
 
+### Пересоздание БД и проверка миграций
+
+```bash
+docker compose down -v
+docker compose up -d db
+docker compose run --rm migrate
+```
+
+Проверки после успешного `alembic upgrade head`:
+
+```bash
+docker compose exec db psql -U postgres -d salon -c "SELECT version_num, pg_catalog.format_type(a.atttypid, a.atttypmod) AS version_type FROM alembic_version v JOIN pg_catalog.pg_attribute a ON a.attrelid = 'alembic_version'::regclass AND a.attname = 'version_num' LIMIT 1;"
+docker compose exec db psql -U postgres -d salon -c "\d masters"
+```
+
+Ожидаемо:
+- `alembic_version.version_num` имеет тип `character varying(255)` (или больше).
+- В `masters` есть колонка `telegram_chat_id` и индекс `ix_masters_telegram_chat_id`.
+
 ### Seed админ-аккаунтов (dev)
 
 ```bash

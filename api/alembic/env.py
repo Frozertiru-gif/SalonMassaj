@@ -18,18 +18,57 @@ target_metadata = Base.metadata
 logger = logging.getLogger(__name__)
 
 
-def _ensure_alembic_version_column_length(connection) -> None:
-    # Some local revision IDs are longer than 32 chars (for example merge revisions).
-    # If the project was bootstrapped with varchar(32), alembic crashes while inserting
-    # the revision into alembic_version. Widen the column before running migrations.
-    try:
-        table_exists = connection.execute(text("SELECT to_regclass('public.alembic_version') IS NOT NULL")).scalar_one()
-    except ProgrammingError:
-        logger.exception("Failed to check alembic_version existence")
-        raise
+ALEMBIC_VERSION_TABLE = "alembic_version"
+ALEMBIC_VERSION_COLUMN_LENGTH = 128
+
+
+def _quote_ident(connection, ident: str) -> str:
+    return connection.dialect.identifier_preparer.quote(ident)
+
+
+def _format_qualified_name(connection, schema: str | None, table: str) -> str:
+    quoted_table = _quote_ident(connection, table)
+    if not schema:
+        return quoted_table
+    return f"{_quote_ident(connection, schema)}.{quoted_table}"
+
+
+def _ensure_alembic_version_table(connection, schema: str | None) -> None:
+    # Some local revision IDs are longer than 32 chars.
+    # Keep alembic_version.version_num wide enough before migrations run.
+    table_schema = schema or "public"
+    qualified_table = _format_qualified_name(connection, schema, ALEMBIC_VERSION_TABLE)
+
+    table_exists = connection.execute(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = :table_schema
+                  AND table_name = :table_name
+            )
+            """
+        ),
+        {"table_schema": table_schema, "table_name": ALEMBIC_VERSION_TABLE},
+    ).scalar_one()
 
     if not table_exists:
-        logger.info("alembic_version table not found, skip pre-migration fix")
+        connection.execute(
+            text(
+                f"""
+                CREATE TABLE {qualified_table} (
+                    version_num VARCHAR({ALEMBIC_VERSION_COLUMN_LENGTH}) NOT NULL,
+                    CONSTRAINT {ALEMBIC_VERSION_TABLE}_pkc PRIMARY KEY (version_num)
+                )
+                """
+            )
+        )
+        logger.info(
+            "Created %s with version_num VARCHAR(%s)",
+            qualified_table,
+            ALEMBIC_VERSION_COLUMN_LENGTH,
+        )
         return
 
     column_info = connection.execute(
@@ -37,30 +76,37 @@ def _ensure_alembic_version_column_length(connection) -> None:
             """
             SELECT data_type, character_maximum_length
             FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = 'alembic_version'
+            WHERE table_schema = :table_schema
+              AND table_name = :table_name
               AND column_name = 'version_num'
             """
-        )
+        ),
+        {"table_schema": table_schema, "table_name": ALEMBIC_VERSION_TABLE},
     ).first()
 
-    if (
+    needs_widening = (
         column_info
-        and column_info.data_type == "character varying"
+        and column_info.data_type in {"character varying", "character"}
         and column_info.character_maximum_length is not None
-        and column_info.character_maximum_length == 32
-    ):
+        and column_info.character_maximum_length < ALEMBIC_VERSION_COLUMN_LENGTH
+    )
+
+    if needs_widening:
         connection.execute(
             text(
-                """
-                ALTER TABLE alembic_version
-                ALTER COLUMN version_num TYPE VARCHAR(64)
+                f"""
+                ALTER TABLE {qualified_table}
+                ALTER COLUMN version_num TYPE VARCHAR({ALEMBIC_VERSION_COLUMN_LENGTH})
                 """
             )
         )
-        logger.info("alembic_version.version_num widened to varchar(64)")
+        logger.info(
+            "Updated %s.version_num to VARCHAR(%s)",
+            qualified_table,
+            ALEMBIC_VERSION_COLUMN_LENGTH,
+        )
     else:
-        logger.info("alembic_version.version_num ok")
+        logger.info("Checked %s.version_num (no change needed)", qualified_table)
 
 
 def run_migrations_offline() -> None:
@@ -84,10 +130,29 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        version_table_schema = config.get_main_option("version_table_schema") or None
+        context_configure_kwargs = {
+            "connection": connection,
+            "target_metadata": target_metadata,
+        }
+        if version_table_schema:
+            context_configure_kwargs["version_table_schema"] = version_table_schema
+
+        try:
+            _ensure_alembic_version_table(connection, version_table_schema)
+        except ProgrammingError:
+            logger.exception("Failed to ensure alembic version table")
+            raise
+
+        # _ensure_alembic_version_table executes SQL and can open an implicit
+        # transaction on SQLAlchemy 2.x connections. Finalize it before Alembic
+        # creates its own migration transaction (required for autocommit_block).
+        if connection.in_transaction():
+            connection.commit()
+
+        context.configure(**context_configure_kwargs)
 
         with context.begin_transaction():
-            _ensure_alembic_version_column_length(connection)
             context.run_migrations()
 
 

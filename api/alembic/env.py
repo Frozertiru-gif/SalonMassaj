@@ -162,6 +162,13 @@ def run_migrations_online() -> None:
             logger.exception("Failed to ensure alembic version table")
             raise
 
+        # ensure_alembic_version_table() issues SQL that triggers SQLAlchemy's
+        # implicit transaction. Close it before Alembic starts migration-level
+        # transactions so `transaction_per_migration=True` can commit each
+        # revision independently (needed for enum value usage across revisions).
+        if connection.in_transaction():
+            connection.commit()
+
         context.configure(**context_configure_kwargs)
 
         with context.begin_transaction():

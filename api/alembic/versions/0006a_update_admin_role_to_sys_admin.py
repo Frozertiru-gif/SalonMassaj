@@ -24,7 +24,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    admins_table_exists = bind.execute(sa.text("SELECT to_regclass('public.admins') IS NOT NULL")).scalar()
-    if admins_table_exists:
-        bind.execute(sa.text("UPDATE admins SET role = 'OWNER' WHERE role = 'SYS_ADMIN'"))
+    # Irreversible data migration: do not rewrite SYS_ADMIN back to OWNER.
+    pass

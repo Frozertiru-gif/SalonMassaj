@@ -16,12 +16,23 @@ depends_on = None
 
 
 def upgrade() -> None:
+    adminrole_enum = postgresql.ENUM("OWNER", "ADMIN", name="adminrole", create_type=False)
+    bookingstatus_enum = postgresql.ENUM(
+        "NEW", "CONFIRMED", "CANCELLED", "DONE", name="bookingstatus", create_type=False
+    )
+    notificationtype_enum = postgresql.ENUM("BOOKING_CREATED", name="notificationtype", create_type=False)
+
+    bind = op.get_bind()
+    adminrole_enum.create(bind, checkfirst=True)
+    bookingstatus_enum.create(bind, checkfirst=True)
+    notificationtype_enum.create(bind, checkfirst=True)
+
     op.create_table(
         "admins",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("email", sa.String(length=255), nullable=False),
         sa.Column("password_hash", sa.String(length=255), nullable=False),
-        sa.Column("role", sa.Enum("OWNER", "ADMIN", name="adminrole"), nullable=False),
+        sa.Column("role", adminrole_enum, nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
@@ -75,7 +86,7 @@ def upgrade() -> None:
         sa.Column("starts_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("ends_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("comment", sa.Text(), nullable=True),
-        sa.Column("status", sa.Enum("NEW", "CONFIRMED", "CANCELLED", "DONE", name="bookingstatus"), nullable=False),
+        sa.Column("status", bookingstatus_enum, nullable=False),
         sa.Column("source", sa.String(length=50), nullable=False, server_default="WEB"),
         sa.Column("is_read", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
@@ -87,7 +98,7 @@ def upgrade() -> None:
     op.create_table(
         "notifications",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("type", sa.Enum("BOOKING_CREATED", name="notificationtype"), nullable=False),
+        sa.Column("type", notificationtype_enum, nullable=False),
         sa.Column("payload", postgresql.JSONB(), nullable=False),
         sa.Column("is_read", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
@@ -95,6 +106,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    adminrole_enum = postgresql.ENUM("OWNER", "ADMIN", name="adminrole", create_type=False)
+    bookingstatus_enum = postgresql.ENUM(
+        "NEW", "CONFIRMED", "CANCELLED", "DONE", name="bookingstatus", create_type=False
+    )
+    notificationtype_enum = postgresql.ENUM("BOOKING_CREATED", name="notificationtype", create_type=False)
+
     op.drop_table("notifications")
     op.drop_index("ix_bookings_is_read", table_name="bookings")
     op.drop_index("ix_bookings_status", table_name="bookings")
@@ -107,6 +124,7 @@ def downgrade() -> None:
     op.drop_table("service_categories")
     op.drop_index("ix_admins_email", table_name="admins")
     op.drop_table("admins")
-    op.execute("DROP TYPE IF EXISTS adminrole")
-    op.execute("DROP TYPE IF EXISTS bookingstatus")
-    op.execute("DROP TYPE IF EXISTS notificationtype")
+    bind = op.get_bind()
+    notificationtype_enum.drop(bind, checkfirst=True)
+    bookingstatus_enum.drop(bind, checkfirst=True)
+    adminrole_enum.drop(bind, checkfirst=True)

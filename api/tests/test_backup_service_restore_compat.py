@@ -1,10 +1,11 @@
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from app.core.config import settings
-from app.services.backup_service import BackupService
+from app.services.backup_service import BackupService, RestoreExecution
 
 
 class BackupServiceRestoreCompatTests(unittest.TestCase):
@@ -54,6 +55,39 @@ class BackupServiceRestoreCompatTests(unittest.TestCase):
             "SET statement_timeout = 0;\n"
             "SELECT 1;\n",
         )
+
+    def test_restore_stderr_classifier_known_non_fatal(self):
+        service = self._make_service()
+        stderr = (
+            'pg_restore: error: could not execute query: ERROR:  unrecognized configuration parameter "transaction_timeout"\n'
+            "pg_restore: warning: errors ignored on restore: 1\n"
+        )
+
+        self.assertTrue(service._is_known_non_fatal_restore_stderr(stderr))
+
+    def test_restore_stderr_classifier_fatal(self):
+        service = self._make_service()
+        stderr = "pg_restore: error: relation \"admins\" does not exist"
+
+        self.assertFalse(service._is_known_non_fatal_restore_stderr(stderr))
+
+    def test_restore_execution_non_fatal_error_code_is_accepted(self):
+        service = self._make_service()
+        execution = RestoreExecution(
+            stdout="",
+            stderr='pg_restore: error: could not execute query: ERROR:  unrecognized configuration parameter "transaction_timeout"\n'
+            "pg_restore: warning: errors ignored on restore: 1\n",
+            returncode=1,
+        )
+
+        service._handle_restore_execution(execution)
+
+    def test_restore_execution_fatal_error_code_raises(self):
+        service = self._make_service()
+        execution = RestoreExecution(stdout="", stderr='pg_restore: error: syntax error at or near "BAD"', returncode=1)
+
+        with self.assertRaises(RuntimeError):
+            service._handle_restore_execution(execution)
 
 
 if __name__ == "__main__":

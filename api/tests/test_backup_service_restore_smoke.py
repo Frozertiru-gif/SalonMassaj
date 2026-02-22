@@ -36,9 +36,8 @@ class BackupServiceRestoreSmokeTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(
                     return_value=RestoreExecution(
                         stdout="done",
-                        stderr='pg_restore: error: could not execute query: ERROR:  unrecognized configuration parameter "transaction_timeout"\n'
-                        "pg_restore: warning: errors ignored on restore: 1\n",
-                        returncode=1,
+                        stderr="pg_restore: warning: skipped unsupported SET statement\n",
+                        returncode=0,
                     )
                 ),
             ),

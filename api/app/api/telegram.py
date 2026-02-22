@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -639,6 +640,31 @@ async def _handle_message(message: dict[str, Any], db: AsyncSession) -> None:
     await send_message(chat_id=telegram_user_id, text="Нет доступа")
 
 
+async def _safe_log_event(
+    db: AsyncSession,
+    actor_tg_user_id: int,
+    actor_role: AdminRole | None,
+    action: str,
+    entity_type: str,
+    entity_id: int | str | None,
+    meta: dict[str, Any] | None = None,
+) -> None:
+    try:
+        await log_event(
+            db,
+            actor_type=AuditActorType.telegram,
+            actor_tg_user_id=actor_tg_user_id,
+            actor_role=actor_role,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            meta=meta,
+        )
+    except SQLAlchemyError:
+        logger.warning("tg_audit.skipped action=%s reason=db_error", action, exc_info=True)
+
+
+
 async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> None:
     callback_id = callback_query.get("id")
     data = callback_query.get("data")
@@ -687,9 +713,8 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
             actor_tg_user_id=int(actor_tg_user_id),
         )
         if handled:
-            await log_event(
-                db,
-                actor_type=AuditActorType.telegram,
+            await _safe_log_event(
+                db=db,
                 actor_tg_user_id=int(actor_tg_user_id),
                 actor_role=access.admin_role,
                 action="backup.callback_action",

@@ -48,11 +48,14 @@ class RestoreExecution:
 
 class BackupService:
     CUSTOM_DUMP_MAGIC = b"PGDMP"
-    TRANSACTION_TIMEOUT_SET_RE = re.compile(br"^\s*SET\s+transaction_timeout\s*(?:=|TO)\s*[^;]+;\s*$", re.IGNORECASE)
-    KNOWN_NON_FATAL_PATTERNS = (
-        re.compile(r'unrecognized configuration parameter "transaction_timeout"', re.IGNORECASE),
-        re.compile(r"errors ignored on restore:\s*\d+", re.IGNORECASE),
-    )
+    SQL_SET_TIMEOUT_RE = re.compile(br"^\s*SET\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|TO)\s*[^;]+;\s*$", re.IGNORECASE)
+    SUPPORTED_TIMEOUT_SETTINGS = {
+        b"statement_timeout",
+        b"lock_timeout",
+        b"idle_in_transaction_session_timeout",
+        b"idle_session_timeout",
+        b"deadlock_timeout",
+    }
 
     def __init__(self) -> None:
         self._async_lock = asyncio.Lock()
@@ -289,6 +292,7 @@ class BackupService:
         detected_type = "unknown"
         execution = RestoreExecution(stdout="", stderr="", returncode=0)
         await self._log_pg_runtime_versions(env, db_host=db_host, db_port=db_port, db_user=db_user, db_name=db_name)
+        logger.info("backup.restore started file=%s", input_path)
 
         with tempfile.TemporaryDirectory(prefix="restore_") as tmp_dir:
             await dispose_engine()
@@ -394,19 +398,33 @@ class BackupService:
         removed_count = 0
         with source_path.open("rb") as source, target_path.open("wb") as target:
             for raw_line in source:
-                if self.TRANSACTION_TIMEOUT_SET_RE.match(raw_line.rstrip(b"\r\n")):
+                if self._should_remove_timeout_set(raw_line):
                     removed_count += 1
                     continue
                 target.write(raw_line)
         return removed_count
 
+    def _should_remove_timeout_set(self, raw_line: bytes) -> bool:
+        match = self.SQL_SET_TIMEOUT_RE.match(raw_line.rstrip(b"\r\n"))
+        if not match:
+            return False
+
+        parameter_name = match.group(1).lower()
+        return parameter_name.endswith(b"timeout") and parameter_name not in self.SUPPORTED_TIMEOUT_SETTINGS
+
     async def _restore_custom_dump(self, dump_path: Path, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> RestoreExecution:
-        command = [
+        restore_command = [
             "pg_restore",
             "--clean",
             "--if-exists",
             "--no-owner",
             "--no-privileges",
+            str(dump_path),
+        ]
+        psql_command = [
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
             "-h",
             db_host,
             "-p",
@@ -415,19 +433,54 @@ class BackupService:
             db_user,
             "-d",
             db_name,
-            str(dump_path),
         ]
-        process = await asyncio.create_subprocess_exec(
-            *command,
+
+        restore_process = await asyncio.create_subprocess_exec(
+            *restore_command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        stdout, stderr = await process.communicate()
-        stdout_text = (stdout or b"").decode(errors="replace").strip()
-        stderr_text = (stderr or b"").decode(errors="replace").strip()
-        self._log_restore_process_result("custom", command, process.returncode, stderr_text)
-        return RestoreExecution(stdout=stdout_text, stderr=stderr_text, returncode=process.returncode)
+        psql_process = await asyncio.create_subprocess_exec(
+            *psql_command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+
+        assert restore_process.stdout is not None
+        assert psql_process.stdin is not None
+        removed_count = 0
+
+        async for raw_line in restore_process.stdout:
+            if self._should_remove_timeout_set(raw_line):
+                removed_count += 1
+                continue
+            psql_process.stdin.write(raw_line)
+            await psql_process.stdin.drain()
+
+        psql_process.stdin.close()
+        await psql_process.stdin.wait_closed()
+
+        _, restore_stderr = await restore_process.communicate()
+        psql_stdout, psql_stderr = await psql_process.communicate()
+
+        restore_stderr_text = (restore_stderr or b"").decode(errors="replace").strip()
+        psql_stderr_text = (psql_stderr or b"").decode(errors="replace").strip()
+        stderr_text = "\n".join([part for part in (restore_stderr_text, psql_stderr_text) if part]).strip()
+        stdout_text = (psql_stdout or b"").decode(errors="replace").strip()
+        returncode = 0 if restore_process.returncode == 0 and psql_process.returncode == 0 else 1
+
+        if removed_count:
+            logger.info(
+                "backup.restore compatibility_filter removed=%s parameter_suffix=timeout source=custom_dump",
+                removed_count,
+            )
+
+        self._log_restore_process_result("custom_dump_stream", restore_command, restore_process.returncode, restore_stderr_text)
+        self._log_restore_process_result("custom_dump_apply", psql_command, psql_process.returncode, psql_stderr_text)
+        return RestoreExecution(stdout=stdout_text, stderr=stderr_text, returncode=returncode)
 
     async def _restore_plain_sql_dump(self, sql_path: Path, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> RestoreExecution:
         command = [
@@ -458,28 +511,12 @@ class BackupService:
         return RestoreExecution(stdout=stdout_text, stderr=stderr_text, returncode=process.returncode)
 
     def _handle_restore_execution(self, execution: RestoreExecution) -> None:
-        if execution.returncode == 0:
-            return
-
-        if self._is_known_non_fatal_restore_stderr(execution.stderr):
-            logger.warning("backup.restore non-fatal pg_restore errors detected; treating as warning")
-            return
-
-        raise RuntimeError(f"Restore failed: {self._error_tail(execution.stderr)}")
-
-    def _is_known_non_fatal_restore_stderr(self, stderr_text: str) -> bool:
-        if not stderr_text.strip():
-            return False
-        lowered = stderr_text.lower()
-        if "error:" not in lowered:
-            return False
-        return all(pattern.search(stderr_text) for pattern in self.KNOWN_NON_FATAL_PATTERNS)
+        if execution.returncode != 0:
+            raise RuntimeError(f"Restore failed: {self._error_tail(execution.stderr)}")
 
     def _summarize_warnings(self, stderr_text: str) -> str | None:
         lines = [line.strip() for line in stderr_text.splitlines() if line.strip()]
-        warnings = [line for line in lines if line.lower().startswith("pg_restore:") or "warning" in line.lower()]
-        if not warnings and self._is_known_non_fatal_restore_stderr(stderr_text):
-            return "Обнаружены некритичные ошибки совместимости pg_restore"
+        warnings = [line for line in lines if "warning" in line.lower()]
         if not warnings:
             return None
         return "; ".join(warnings[:2])

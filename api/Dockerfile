@@ -4,8 +4,9 @@ FROM python:3.11-slim-bookworm
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash postgresql-client-common postgresql-client-15 \
+    && apt-get install -y --no-install-recommends bash gnupg postgresql-client-common postgresql-client-15 \
     && bash --version \
+    && gpg --version | head -n 1 \
     && psql --version | grep -E ' 15(\.| )' \
     && pg_dump --version | grep -E ' 15(\.| )' \
     && pg_restore --version | grep -E ' 15(\.| )' \

@@ -29,7 +29,9 @@ class BackupServiceRestoreSmokeTests(unittest.IsolatedAsyncioTestCase):
             patch.object(service, "_log_pg_runtime_versions", new=AsyncMock()),
             patch("app.services.backup_service.dispose_engine", new=AsyncMock()),
             patch("app.services.backup_service.reinitialize_engine"),
+            patch.object(service, "_ensure_restore_runtime_compatibility", new=AsyncMock()),
             patch.object(service, "_terminate_other_db_connections", new=AsyncMock()),
+            patch.object(service, "_reset_public_schema", new=AsyncMock()),
             patch.object(
                 service,
                 "_restore_custom_dump",
@@ -42,6 +44,7 @@ class BackupServiceRestoreSmokeTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ),
             patch.object(service, "_health_check_db", new=AsyncMock()),
+            patch.object(service, "_verify_restored_schema", new=AsyncMock()),
         ):
             result = await service.restore_from_path(path=dump_path, actor_tg_user_id=1, source="test")
 

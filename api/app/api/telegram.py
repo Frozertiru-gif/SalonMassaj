@@ -383,8 +383,11 @@ async def _handle_backup_callback(callback_id: str | None, data: str, message: d
             await send_message(chat_id=chat_id, text=f"Ошибка отправки: {exc}")
     elif action[1] == "restore_latest" and len(action) > 2 and action[2] == "confirm":
         try:
-            await backup_service.restore_latest_local_backup(actor_tg_user_id=actor_tg_user_id)
-            await send_message(chat_id=chat_id, text="Восстановление из последнего локального бэкапа завершено.")
+            result = await backup_service.restore_latest_local_backup(actor_tg_user_id=actor_tg_user_id)
+            if result.get("status") == "ok_with_warnings":
+                await send_message(chat_id=chat_id, text="⚠️ Восстановлено с warnings. Подробности в логах.")
+            else:
+                await send_message(chat_id=chat_id, text="Восстановление из последнего локального бэкапа завершено.")
         except BackupBusyError:
             await send_message(chat_id=chat_id, text="Операция уже выполняется. Попробуйте позже.")
         except Exception as exc:  # noqa: BLE001
@@ -426,20 +429,32 @@ async def _handle_backup_callback(callback_id: str | None, data: str, message: d
 
 async def _run_restore_and_report(chat_id: int, actor_tg_user_id: int, restore_path: Path, restore_name: str) -> None:
     try:
+        file_size = restore_path.stat().st_size if restore_path.exists() else 0
         result = await backup_service.restore_from_path(
             path=restore_path,
             actor_tg_user_id=actor_tg_user_id,
             source=f"telegram_upload:{restore_name}",
         )
-        await send_message(
-            chat_id=chat_id,
-            text=(
+        status = result.get("status")
+        warning_summary = result.get("warning_summary")
+        if status == "ok_with_warnings":
+            text = (
+                "⚠️ Восстановление завершено с warnings\n"
+                f"Файл: {result.get('file')}\n"
+                f"Тип: {result.get('file_type')}\n"
+                f"Время: {result.get('duration_seconds')} сек\n"
+                f"Размер: {file_size} байт\n"
+                f"Подробности: {warning_summary or 'см. логи'}"
+            )
+        else:
+            text = (
                 "✅ Восстановление завершено\n"
                 f"Файл: {result.get('file')}\n"
                 f"Тип: {result.get('file_type')}\n"
-                f"Время: {result.get('duration_seconds')} сек"
-            ),
-        )
+                f"Время: {result.get('duration_seconds')} сек\n"
+                f"Размер: {file_size} байт"
+            )
+        await send_message(chat_id=chat_id, text=text)
     except BackupBusyError:
         await send_message(chat_id=chat_id, text="Операция уже выполняется. Попробуйте позже.")
     except Exception as exc:  # noqa: BLE001
@@ -453,6 +468,8 @@ async def telegram_health() -> dict[str, bool]:
 
 @router.post("/telegram/webhook")
 async def telegram_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    if backup_service.is_maintenance:
+        return {"ok": True, "detail": "maintenance: restore in progress"}
     tg_settings = await get_tg_notifications_settings(db)
     required_secret = settings.telegram_webhook_secret or tg_settings.webhook_secret
     if not required_secret:

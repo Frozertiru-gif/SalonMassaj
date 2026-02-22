@@ -3,8 +3,9 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api import admin, auth, public, telegram
 from app.core.config import settings
@@ -41,12 +42,25 @@ app.include_router(admin.router)
 app.include_router(telegram.router)
 
 
+@app.middleware("http")
+async def maintenance_middleware(request: Request, call_next):
+    if backup_service.is_maintenance:
+        path = request.url.path
+        if path not in {"/health", "/telegram/health", "/telegram/webhook"}:
+            return JSONResponse(status_code=503, content={"detail": "maintenance: restore in progress"})
+    return await call_next(request)
+
+
+
 async def _telegram_polling_loop() -> None:
     logger.info("Telegram polling worker started")
     offset: int | None = None
     backoff_seconds = 1
     while True:
         try:
+            if backup_service.is_maintenance:
+                await asyncio.sleep(1)
+                continue
             logger.info("polling: request sent offset=%s", offset)
             response = await get_updates(offset=offset, timeout=30, allowed_updates=["message", "callback_query"])
             updates = response.get("result") or []

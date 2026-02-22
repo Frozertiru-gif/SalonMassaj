@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash postgresql-client gnupg \
+    && apt-get install -y --no-install-recommends bash postgresql-client-common postgresql-client-15 gnupg \
     && bash --version \
     && rm -rf /var/lib/apt/lists/*
 

@@ -28,7 +28,6 @@ class BackupServiceRestoreSmokeTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(service, "_log_pg_runtime_versions", new=AsyncMock()),
             patch("app.services.backup_service.dispose_engine", new=AsyncMock()),
-            patch("app.services.backup_service.reinitialize_engine"),
             patch.object(service, "_ensure_restore_runtime_compatibility", new=AsyncMock()),
             patch.object(service, "_terminate_other_db_connections", new=AsyncMock()),
             patch.object(service, "_reset_public_schema", new=AsyncMock()),

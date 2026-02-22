@@ -67,12 +67,23 @@ async def _telegram_polling_loop() -> None:
             logger.info("polling: got %s updates", len(updates))
             backoff_seconds = 1
             for update in updates:
-                async with AsyncSessionLocal() as db:
-                    async with db.begin():
-                        await telegram.process_update(update, db)
                 update_id = update.get("update_id")
-                if isinstance(update_id, int):
-                    offset = update_id + 1
+                try:
+                    async with AsyncSessionLocal() as db:
+                        await telegram.process_update(update, db)
+                        try:
+                            await db.commit()
+                        except Exception:  # noqa: BLE001
+                            logger.warning("polling: commit skipped update_id=%s", update_id, exc_info=True)
+                            try:
+                                await db.rollback()
+                            except Exception:  # noqa: BLE001
+                                logger.warning("polling: rollback failed update_id=%s", update_id, exc_info=True)
+                except Exception:  # noqa: BLE001
+                    logger.exception("polling: update processing failed update_id=%s", update_id)
+                finally:
+                    if isinstance(update_id, int):
+                        offset = update_id + 1
         except asyncio.CancelledError:
             logger.info("Telegram polling worker stopped")
             raise

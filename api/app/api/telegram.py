@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +47,26 @@ class PendingRestoreUpload:
 
 
 PENDING_RESTORE_UPLOADS: dict[int, PendingRestoreUpload] = {}
+
+
+_IDEMPOTENCY_TTL_SECONDS = 300
+_PROCESSED_CALLBACKS: dict[str, float] = {}
+_PROCESSED_UPDATES: dict[int, float] = {}
+
+
+def _is_processed_recently(cache: dict[Any, float], key: Any, now: float | None = None) -> bool:
+    if now is None:
+        now = time.monotonic()
+    expired = [cache_key for cache_key, ts in cache.items() if now - ts > _IDEMPOTENCY_TTL_SECONDS]
+    for cache_key in expired:
+        cache.pop(cache_key, None)
+
+    ts = cache.get(key)
+    if ts is None:
+        cache[key] = now
+        return False
+    return now - ts <= _IDEMPOTENCY_TTL_SECONDS
+
 
 ADMIN_ACTION_ALIASES: dict[str, set[str]] = {
     "new": {"новые записи", "новые"},
@@ -347,11 +368,12 @@ async def _handle_backup_callback(callback_id: str | None, data: str, message: d
     if not data.startswith("bk:"):
         return False
 
+    if callback_id:
+        await answer_callback_query(callback_id)
+
     action = data.split(":")
     chat_id = (message.get("chat") or {}).get("id")
     if chat_id is None:
-        if callback_id:
-            await answer_callback_query(callback_id, "Не удалось определить чат")
         return True
 
     if action[1] == "status":
@@ -391,7 +413,7 @@ async def _handle_backup_callback(callback_id: str | None, data: str, message: d
         except BackupBusyError:
             await send_message(chat_id=chat_id, text="Операция уже выполняется. Попробуйте позже.")
         except Exception as exc:  # noqa: BLE001
-            await send_message(chat_id=chat_id, text=f"Ошибка восстановления: {exc}")
+            await send_message(chat_id=chat_id, text=f"❌ Ошибка восстановления: {exc}")
     elif action[1] == "restore_file" and len(action) > 2 and action[2] == "start":
         pending = PENDING_RESTORE_UPLOADS.get(actor_tg_user_id) or PendingRestoreUpload()
         pending.awaiting_upload = True
@@ -422,8 +444,6 @@ async def _handle_backup_callback(callback_id: str | None, data: str, message: d
         PENDING_RESTORE_UPLOADS.pop(actor_tg_user_id, None)
         await send_message(chat_id=chat_id, text="Действие отменено.")
 
-    if callback_id:
-        await answer_callback_query(callback_id)
     return True
 
 
@@ -489,6 +509,11 @@ async def telegram_webhook(request: Request, db: AsyncSession = Depends(get_db))
 
 
 async def process_update(update: dict[str, Any], db: AsyncSession) -> None:
+    update_id = update.get("update_id")
+    if isinstance(update_id, int) and _is_processed_recently(_PROCESSED_UPDATES, update_id):
+        logger.info("tg_update.skipped reason=duplicate update_id=%s", update_id)
+        return
+
     log_update_received(update)
     try:
         if "message" in update:
@@ -675,6 +700,12 @@ async def _handle_callback(callback_query: dict[str, Any], db: AsyncSession) -> 
         if callback_id:
             await answer_callback_query(callback_id, "Нет доступа")
         return
+
+    if callback_id and _is_processed_recently(_PROCESSED_CALLBACKS, callback_id):
+        logger.info("tg_callback.skipped reason=duplicate callback_id=%s", callback_id)
+        await answer_callback_query(callback_id, "Уже обработано")
+        return
+
     access = await _resolve_telegram_access(db, int(actor_tg_user_id))
 
     master_parsed = _parse_master_callback(str(data or ""))

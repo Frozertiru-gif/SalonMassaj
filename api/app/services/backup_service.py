@@ -17,7 +17,7 @@ from urllib.parse import unquote, urlparse
 import httpx
 
 from app.core.config import settings
-from app.db import dispose_engine, reinitialize_engine
+from app.db import dispose_engine
 from app.services.telegram import TelegramError, get_file, send_document, send_message
 
 logger = logging.getLogger(__name__)
@@ -356,7 +356,7 @@ class BackupService:
                 await self._health_check_db(db_host=db_host, db_port=db_port, db_user=db_user, db_name=db_name, env=env)
                 await self._verify_restored_schema(db_host=db_host, db_port=db_port, db_user=db_user, db_name=db_name, env=env)
             finally:
-                reinitialize_engine()
+                await dispose_engine()
 
         warning_summary = self._summarize_warnings(execution.stderr)
         status = "ok_with_warnings" if warning_summary else "ok"

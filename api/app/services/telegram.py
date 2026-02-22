@@ -35,7 +35,10 @@ DEFAULT_MASTER_TEMPLATE = (
 
 
 class TelegramError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, status_code: int | None = None, description: str | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.description = description
 
 
 def _short_response_text(value: str, limit: int = 500) -> str:
@@ -145,14 +148,25 @@ async def _telegram_api(method: str, payload: dict[str, Any], timeout_override: 
             await asyncio.sleep(0.4 * attempt)
             continue
 
-        if not response.is_success:
-            logger.warning("Telegram API request failed: method=%s status=%s body=%s", method, response.status_code, short_text)
-            raise TelegramError(f"Telegram API request failed with status {response.status_code}")
+        data: dict[str, Any] = {}
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
 
-        data = response.json()
+        if not response.is_success:
+            description = str(data.get("description") or "")
+            logger.warning("Telegram API request failed: method=%s status=%s body=%s", method, response.status_code, short_text)
+            raise TelegramError(
+                f"Telegram API request failed with status {response.status_code}",
+                status_code=response.status_code,
+                description=description,
+            )
+
         if not data.get("ok"):
+            description = str(data.get("description") or "Telegram API returned non-ok response")
             logger.warning("Telegram API error response: method=%s status=%s body=%s", method, response.status_code, short_text)
-            raise TelegramError(data.get("description") or "Telegram API returned non-ok response")
+            raise TelegramError(description, status_code=response.status_code, description=description)
 
         logger.info("Telegram API request succeeded: method=%s", method)
         return data
@@ -510,4 +524,17 @@ async def answer_callback_query(callback_query_id: str, text: str | None = None)
     payload: dict[str, Any] = {"callback_query_id": callback_query_id}
     if text:
         payload["text"] = text
-    return await _telegram_api("answerCallbackQuery", payload)
+    try:
+        return await _telegram_api("answerCallbackQuery", payload)
+    except TelegramError as exc:
+        description = (exc.description or str(exc)).lower()
+        is_stale_callback = exc.status_code == 400 and (
+            "query is too old" in description
+            or "query id is invalid" in description
+            or "invalid query id" in description
+        )
+        if is_stale_callback:
+            logger.warning("Telegram callback ack skipped: callback_query_id=%s reason=%s", callback_query_id, exc.description or str(exc))
+            return {"ok": False, "result": None}
+        logger.warning("Telegram callback ack failed: callback_query_id=%s error=%s", callback_query_id, exc)
+        return {"ok": False, "result": None}

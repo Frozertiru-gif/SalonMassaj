@@ -233,6 +233,7 @@ curl -s http://localhost:8000/admin/telegram/webhook-info
 - файлы в `BACKUP_DIR` (`*.dump.gpg`) + `last_backup.json`,
 - retention через `RETENTION_KEEP`.
 - backup-скрипт исполняется через `bash`, поэтому `bash` должен быть установлен внутри API-контейнера (в текущем `api/Dockerfile` уже установлен).
+- базовый образ API зафиксирован на `python:3.11-slim-bookworm`, чтобы в стандартных Debian-репозиториях был доступен `postgresql-client-15` (нужен для совместимых `pg_dump`/`pg_restore` с PostgreSQL 15, без подключения внешнего PGDG).
 
 Обязательные ENV:
 - `BACKUP_ENABLED=true`

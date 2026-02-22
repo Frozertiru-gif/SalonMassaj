@@ -56,6 +56,7 @@ class BackupService:
         b"idle_session_timeout",
         b"deadlock_timeout",
     }
+    REQUIRED_RESTORED_TABLES = ("alembic_version", "admins", "masters", "services", "bookings")
 
     def __init__(self) -> None:
         self._async_lock = asyncio.Lock()
@@ -315,7 +316,9 @@ class BackupService:
                         shutil.copyfileobj(source, target)
                     restore_input_path = gunzipped_path
 
+                await self._ensure_restore_runtime_compatibility(db_host=db_host, db_port=db_port, db_user=db_user, db_name=db_name, env=env)
                 await self._terminate_other_db_connections(db_host, db_port, db_user, db_name, env)
+                await self._reset_public_schema(db_host, db_port, db_user, db_name, env)
                 dump_format = self._detect_dump_format(restore_input_path)
                 detected_type = dump_format
                 logger.info("backup.restore format_detected format=%s file=%s", dump_format, input_path)
@@ -351,6 +354,7 @@ class BackupService:
 
                 self._handle_restore_execution(execution)
                 await self._health_check_db(db_host=db_host, db_port=db_port, db_user=db_user, db_name=db_name, env=env)
+                await self._verify_restored_schema(db_host=db_host, db_port=db_port, db_user=db_user, db_name=db_name, env=env)
             finally:
                 reinitialize_engine()
 
@@ -413,18 +417,11 @@ class BackupService:
         return parameter_name.endswith(b"timeout") and parameter_name not in self.SUPPORTED_TIMEOUT_SETTINGS
 
     async def _restore_custom_dump(self, dump_path: Path, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> RestoreExecution:
-        restore_command = [
+        command = [
             "pg_restore",
-            "--clean",
-            "--if-exists",
+            "--exit-on-error",
             "--no-owner",
             "--no-privileges",
-            str(dump_path),
-        ]
-        psql_command = [
-            "psql",
-            "-v",
-            "ON_ERROR_STOP=1",
             "-h",
             db_host,
             "-p",
@@ -433,54 +430,19 @@ class BackupService:
             db_user,
             "-d",
             db_name,
+            str(dump_path),
         ]
-
-        restore_process = await asyncio.create_subprocess_exec(
-            *restore_command,
+        process = await asyncio.create_subprocess_exec(
+            *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        psql_process = await asyncio.create_subprocess_exec(
-            *psql_command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-
-        assert restore_process.stdout is not None
-        assert psql_process.stdin is not None
-        removed_count = 0
-
-        async for raw_line in restore_process.stdout:
-            if self._should_remove_timeout_set(raw_line):
-                removed_count += 1
-                continue
-            psql_process.stdin.write(raw_line)
-            await psql_process.stdin.drain()
-
-        psql_process.stdin.close()
-        await psql_process.stdin.wait_closed()
-
-        _, restore_stderr = await restore_process.communicate()
-        psql_stdout, psql_stderr = await psql_process.communicate()
-
-        restore_stderr_text = (restore_stderr or b"").decode(errors="replace").strip()
-        psql_stderr_text = (psql_stderr or b"").decode(errors="replace").strip()
-        stderr_text = "\n".join([part for part in (restore_stderr_text, psql_stderr_text) if part]).strip()
-        stdout_text = (psql_stdout or b"").decode(errors="replace").strip()
-        returncode = 0 if restore_process.returncode == 0 and psql_process.returncode == 0 else 1
-
-        if removed_count:
-            logger.info(
-                "backup.restore compatibility_filter removed=%s parameter_suffix=timeout source=custom_dump",
-                removed_count,
-            )
-
-        self._log_restore_process_result("custom_dump_stream", restore_command, restore_process.returncode, restore_stderr_text)
-        self._log_restore_process_result("custom_dump_apply", psql_command, psql_process.returncode, psql_stderr_text)
-        return RestoreExecution(stdout=stdout_text, stderr=stderr_text, returncode=returncode)
+        stdout, stderr = await process.communicate()
+        stdout_text = (stdout or b"").decode(errors="replace").strip()
+        stderr_text = (stderr or b"").decode(errors="replace").strip()
+        self._log_restore_process_result("custom_dump", command, process.returncode, stderr_text)
+        return RestoreExecution(stdout=stdout_text, stderr=stderr_text, returncode=process.returncode)
 
     async def _restore_plain_sql_dump(self, sql_path: Path, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> RestoreExecution:
         command = [
@@ -579,11 +541,91 @@ class BackupService:
                 ((stdout or stderr or b"").decode(errors="replace").strip()),
             )
 
+    async def _ensure_restore_runtime_compatibility(self, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> None:
+        pg_restore_version = await self._read_command_output(["pg_restore", "--version"], env)
+        pg_dump_version = await self._read_command_output(["pg_dump", "--version"], env)
+        server_version_num = await self._read_command_output(
+            [
+                "psql",
+                "-h",
+                db_host,
+                "-p",
+                db_port,
+                "-U",
+                db_user,
+                "-d",
+                db_name,
+                "-Atqc",
+                "SHOW server_version_num",
+            ],
+            env,
+        )
+        server_version = await self._read_command_output(
+            [
+                "psql",
+                "-h",
+                db_host,
+                "-p",
+                db_port,
+                "-U",
+                db_user,
+                "-d",
+                db_name,
+                "-Atqc",
+                "SHOW server_version",
+            ],
+            env,
+        )
+
+        restore_major = self._extract_pg_major(pg_restore_version)
+        dump_major = self._extract_pg_major(pg_dump_version)
+        server_major = self._extract_server_major(server_version_num, server_version)
+        logger.info(
+            "backup.restore version_check pg_restore=%s pg_dump=%s server=%s",
+            pg_restore_version,
+            pg_dump_version,
+            server_version,
+        )
+        if not restore_major or not dump_major or not server_major:
+            raise RuntimeError("Не удалось определить версии PostgreSQL (pg_restore/pg_dump/server). Восстановление остановлено.")
+        if restore_major != server_major or dump_major != server_major:
+            raise RuntimeError(
+                "Несовместимые версии PostgreSQL: "
+                f"pg_restore={restore_major}, pg_dump={dump_major}, server={server_major}. "
+                "Нужен клиент той же мажорной версии (иначе возможна ошибка transaction_timeout)."
+            )
+
+    async def _read_command_output(self, command: list[str], env: dict[str, str]) -> str:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout, stderr = await process.communicate()
+        output = (stdout or b"").decode(errors="replace").strip() or (stderr or b"").decode(errors="replace").strip()
+        if process.returncode != 0:
+            raise RuntimeError(f"Команда завершилась с ошибкой: {' '.join(command)} :: {self._error_tail(output)}")
+        return output
+
+    @staticmethod
+    def _extract_pg_major(version_text: str) -> int | None:
+        match = re.search(r"(\d+)(?:\.\d+)?", version_text)
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _extract_server_major(server_version_num: str, server_version_text: str) -> int | None:
+        raw = (server_version_num or "").strip()
+        if raw.isdigit() and len(raw) >= 2:
+            return int(raw[:2]) if len(raw) > 2 else int(raw)
+        match = re.search(r"(\d+)(?:\.\d+)?", server_version_text)
+        return int(match.group(1)) if match else None
+
     async def _terminate_other_db_connections(self, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> None:
         sql = (
             "SELECT pg_terminate_backend(pid) "
             "FROM pg_stat_activity "
-            "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            f"WHERE datname = '{db_name}' AND pid <> pg_backend_pid()"
         )
         process = await asyncio.create_subprocess_exec(
             "psql",
@@ -604,6 +646,36 @@ class BackupService:
         _, stderr = await process.communicate()
         if process.returncode != 0:
             logger.warning("backup.restore terminate_connections failed: %s", (stderr or b"").decode(errors="replace").strip())
+
+    async def _reset_public_schema(self, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> None:
+        logger.info("backup.restore step=reset_schema database=%s", db_name)
+        sql = (
+            "DROP SCHEMA IF EXISTS public CASCADE;"
+            "CREATE SCHEMA public;"
+            "GRANT ALL ON SCHEMA public TO postgres;"
+            "GRANT ALL ON SCHEMA public TO public;"
+        )
+        process = await asyncio.create_subprocess_exec(
+            "psql",
+            "-h",
+            db_host,
+            "-p",
+            db_port,
+            "-U",
+            db_user,
+            "-d",
+            db_name,
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-Atqc",
+            sql,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0:
+            raise RuntimeError(f"Не удалось очистить схему public: {(stderr or b'').decode(errors='replace').strip()}")
 
     async def _health_check_db(self, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> None:
         process = await asyncio.create_subprocess_exec(
@@ -627,6 +699,34 @@ class BackupService:
         stdout, stderr = await process.communicate()
         if process.returncode != 0 or (stdout or b"").decode().strip() != "1":
             raise RuntimeError(f"Restore health-check failed: {(stderr or b'').decode().strip()}")
+
+    async def _verify_restored_schema(self, db_host: str, db_port: str, db_user: str, db_name: str, env: dict[str, str]) -> None:
+        logger.info("backup.restore step=verify_schema")
+        for table_name in self.REQUIRED_RESTORED_TABLES:
+            sql = f"SELECT to_regclass('public.{table_name}') IS NOT NULL"
+            process = await asyncio.create_subprocess_exec(
+                "psql",
+                "-h",
+                db_host,
+                "-p",
+                db_port,
+                "-U",
+                db_user,
+                "-d",
+                db_name,
+                "-Atqc",
+                sql,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            stdout, stderr = await process.communicate()
+            exists = (stdout or b"").decode(errors="replace").strip().lower()
+            if process.returncode != 0 or exists not in {"t", "true", "1"}:
+                raise RuntimeError(
+                    f"Restore verify failed: table public.{table_name} missing or unreadable: "
+                    f"{(stderr or b'').decode(errors='replace').strip()}"
+                )
 
     @staticmethod
     def _read_env_file(path: Path) -> dict[str, str]:
